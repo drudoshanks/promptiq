@@ -1,0 +1,100 @@
+# Release pipeline, pull-request stage (SRS §16.2): format/lint, type check,
+# unit + database tests (embedded PostgreSQL), build, dependency audit.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_URL: http://localhost:3000
+      DATABASE_URL: postgresql://promptiq:promptiq@localhost:5432/promptiq
+      AUTH_SECRET: ci-only-secret-not-for-production
+      OPTIMISER_PROVIDER: mock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Dependency audit (high and above)
+        run: npm audit --audit-level=high
+
+  # Migrations are applied to a real PostgreSQL service to catch dialect drift
+  # between PGlite (used in tests) and the production engine.
+  migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: promptiq
+          POSTGRES_PASSWORD: promptiq
+          POSTGRES_DB: promptiq
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U promptiq -d promptiq"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://promptiq:promptiq@localhost:5432/promptiq
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run db:migrate
+      - name: Migrations are idempotent
+        run: npm run db:migrate
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [check]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: promptiq
+          POSTGRES_PASSWORD: promptiq
+          POSTGRES_DB: promptiq
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U promptiq -d promptiq"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      CI: "true"
+      APP_URL: http://localhost:3000
+      DATABASE_URL: postgresql://promptiq:promptiq@localhost:5432/promptiq
+      AUTH_SECRET: ci-only-secret-not-for-production
+      OPTIMISER_PROVIDER: mock
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run db:migrate
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report

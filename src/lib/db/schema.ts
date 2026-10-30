@@ -1,0 +1,364 @@
+/**
+ * Drizzle schema mirroring db/migrations/*.sql (SRS §9).
+ *
+ * The SQL migrations are the source of truth for the database; this file gives the
+ * application typed access to the same tables. Keep the two in sync (a drift test
+ * runs the migrations against an embedded PostgreSQL and queries every table).
+ */
+import { relations, sql } from "drizzle-orm";
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  smallint,
+  text,
+  timestamp,
+  unique,
+  uuid,
+} from "drizzle-orm/pg-core";
+
+const tz = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
+
+// ---------------------------------------------------------------------------
+// Authentication (Better Auth) — credentials and sessions only.
+// TS keys use Better Auth's default field names; DB columns are snake_case.
+// ---------------------------------------------------------------------------
+export const authUser = pgTable("auth_user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: boolean("email_verified").notNull().default(false),
+  image: text("image"),
+  createdAt: tz("created_at").notNull().defaultNow(),
+  updatedAt: tz("updated_at").notNull().defaultNow(),
+});
+
+export const authSession = pgTable(
+  "auth_session",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: tz("expires_at").notNull(),
+    token: text("token").notNull().unique(),
+    createdAt: tz("created_at").notNull().defaultNow(),
+    updatedAt: tz("updated_at").notNull().defaultNow(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authUser.id, { onDelete: "cascade" }),
+  },
+  (t) => [index("idx_auth_session_user").on(t.userId)],
+);
+
+export const authAccount = pgTable(
+  "auth_account",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authUser.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: tz("access_token_expires_at"),
+    refreshTokenExpiresAt: tz("refresh_token_expires_at"),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+    updatedAt: tz("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("idx_auth_account_user").on(t.userId)],
+);
+
+export const authVerification = pgTable(
+  "auth_verification",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: tz("expires_at").notNull(),
+    createdAt: tz("created_at").notNull().defaultNow(),
+    updatedAt: tz("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("idx_auth_verification_identifier").on(t.identifier)],
+);
+
+/** Schema object handed to Better Auth's Drizzle adapter (model name → table). */
+export const authSchema = {
+  user: authUser,
+  session: authSession,
+  account: authAccount,
+  verification: authVerification,
+};
+
+// ---------------------------------------------------------------------------
+// Application tables (SRS §9.2)
+// ---------------------------------------------------------------------------
+export const PLAN_CODES = ["free", "pro"] as const;
+export type PlanCode = (typeof PLAN_CODES)[number];
+
+export const appUsers = pgTable("app_users", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  authSubject: text("auth_subject").notNull().unique(),
+  email: text("email").unique(),
+  displayName: text("display_name"),
+  planCode: text("plan_code", { enum: PLAN_CODES }).notNull().default("free"),
+  historyEnabled: boolean("history_enabled").notNull().default(true),
+  personalisationEnabled: boolean("personalisation_enabled").notNull().default(true),
+  onboardedAt: tz("onboarded_at"),
+  createdAt: tz("created_at").notNull().defaultNow(),
+  updatedAt: tz("updated_at").notNull().defaultNow(),
+  deletedAt: tz("deleted_at"),
+});
+
+export const PREFERENCE_SOURCES = ["user_entered", "user_confirmed", "feedback"] as const;
+export type PreferenceSource = (typeof PREFERENCE_SOURCES)[number];
+
+export const userPreferences = pgTable(
+  "user_preferences",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    category: text("category").notNull().default("general"),
+    preferenceKey: text("preference_key").notNull(),
+    preferenceValue: jsonb("preference_value").$type<Record<string, unknown>>().notNull(),
+    source: text("source", { enum: PREFERENCE_SOURCES }).notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }).notNull().default("1.000"),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: tz("created_at").notNull().defaultNow(),
+    updatedAt: tz("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    unique("user_preferences_user_id_category_preference_key_key").on(
+      t.userId,
+      t.category,
+      t.preferenceKey,
+    ),
+    index("idx_preferences_user_enabled").on(t.userId, t.enabled, t.category),
+  ],
+);
+
+export const prompts = pgTable(
+  "prompts",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    title: text("title").notNull().default("Untitled prompt"),
+    category: text("category").notNull().default("general"),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    archivedAt: tz("archived_at"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+    updatedAt: tz("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("idx_prompts_user_updated").on(t.userId, t.updatedAt)],
+);
+
+export const PROVENANCES = ["original", "ai_optimised", "user_edited", "imported"] as const;
+export type Provenance = (typeof PROVENANCES)[number];
+
+export const promptVersions = pgTable(
+  "prompt_versions",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    promptId: uuid("prompt_id")
+      .notNull()
+      .references(() => prompts.id, { onDelete: "cascade" }),
+    versionNumber: integer("version_number").notNull(),
+    parentVersionId: uuid("parent_version_id"),
+    provenance: text("provenance", { enum: PROVENANCES }).notNull(),
+    promptText: text("prompt_text").notNull(),
+    changeSummary: jsonb("change_summary").$type<string[]>().notNull().default([]),
+    tokenEstimate: integer("token_estimate"),
+    tokenEstimateMethod: text("token_estimate_method"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    unique("prompt_versions_prompt_id_version_number_key").on(t.promptId, t.versionNumber),
+    index("idx_prompt_versions_prompt_created").on(t.promptId, t.createdAt),
+  ],
+);
+
+export const RUN_STATUSES = ["queued", "succeeded", "failed", "refused", "incomplete"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export const optimisationRuns = pgTable(
+  "optimisation_runs",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    promptId: uuid("prompt_id").references(() => prompts.id, { onDelete: "set null" }),
+    sourceVersionId: uuid("source_version_id").references(() => promptVersions.id, {
+      onDelete: "set null",
+    }),
+    resultVersionId: uuid("result_version_id").references(() => promptVersions.id, {
+      onDelete: "set null",
+    }),
+    provider: text("provider").notNull().default("openai"),
+    modelId: text("model_id").notNull(),
+    templateVersion: text("template_version").notNull(),
+    taskCategory: text("task_category"),
+    status: text("status", { enum: RUN_STATUSES }).notNull(),
+    inputChars: integer("input_chars").notNull(),
+    outputChars: integer("output_chars"),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    cachedInputTokens: integer("cached_input_tokens"),
+    estimatedCostUsd: numeric("estimated_cost_usd", { precision: 12, scale: 6 }),
+    latencyMs: integer("latency_ms"),
+    requestId: text("request_id"),
+    errorCode: text("error_code"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_runs_user_created").on(t.userId, t.createdAt),
+    index("idx_runs_status_created").on(t.status, t.createdAt),
+  ],
+);
+
+export const feedback = pgTable(
+  "feedback",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => optimisationRuns.id, { onDelete: "cascade" }),
+    rating: smallint("rating").notNull(),
+    reasonCode: text("reason_code"),
+    comment: text("comment"),
+    preferenceSuggestion: jsonb("preference_suggestion").$type<Record<string, unknown>>(),
+    createdAt: tz("created_at").notNull().defaultNow(),
+    updatedAt: tz("updated_at").notNull().defaultNow(),
+  },
+  (t) => [unique("feedback_user_id_run_id_key").on(t.userId, t.runId)],
+);
+
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => optimisationRuns.id, { onDelete: "set null" }),
+    eventType: text("event_type").notNull(),
+    units: integer("units").notNull().default(1),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    costUsd: numeric("cost_usd", { precision: 12, scale: 6 }).notNull().default("0"),
+    idempotencyKey: text("idempotency_key").unique(),
+    createdAt: tz("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_usage_user_created").on(t.userId, t.createdAt),
+    index("idx_usage_type_created").on(t.eventType, t.createdAt),
+  ],
+);
+
+export const SUBSCRIPTION_STATUSES = [
+  "trialing",
+  "active",
+  "past_due",
+  "canceled",
+  "incomplete",
+  "none",
+] as const;
+export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
+
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .unique()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    billingProvider: text("billing_provider").notNull(),
+    providerCustomerId: text("provider_customer_id"),
+    providerSubscriptionId: text("provider_subscription_id").unique(),
+    status: text("status", { enum: SUBSCRIPTION_STATUSES }).notNull(),
+    currentPeriodStart: tz("current_period_start"),
+    currentPeriodEnd: tz("current_period_end"),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    updatedAt: tz("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("idx_subscriptions_customer").on(t.providerCustomerId)],
+);
+
+export const webhookEvents = pgTable(
+  "webhook_events",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    provider: text("provider").notNull(),
+    providerEventId: text("provider_event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    processedAt: tz("processed_at"),
+    processingStatus: text("processing_status", {
+      enum: ["received", "processed", "failed"],
+    })
+      .notNull()
+      .default("received"),
+    errorCode: text("error_code"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+  },
+  (t) => [unique("webhook_events_provider_provider_event_id_key").on(t.provider, t.providerEventId)],
+);
+
+export const deletionJobs = pgTable(
+  "deletion_jobs",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull(),
+    status: text("status", { enum: ["pending", "running", "completed", "failed"] })
+      .notNull()
+      .default("pending"),
+    requestedAt: tz("requested_at").notNull().defaultNow(),
+    completedAt: tz("completed_at"),
+    errorCode: text("error_code"),
+  },
+  (t) => [index("idx_deletion_jobs_user").on(t.userId)],
+);
+
+// ---------------------------------------------------------------------------
+// Relations (for the relational query API)
+// ---------------------------------------------------------------------------
+export const promptsRelations = relations(prompts, ({ many, one }) => ({
+  versions: many(promptVersions),
+  owner: one(appUsers, { fields: [prompts.userId], references: [appUsers.id] }),
+}));
+
+export const promptVersionsRelations = relations(promptVersions, ({ one }) => ({
+  prompt: one(prompts, { fields: [promptVersions.promptId], references: [prompts.id] }),
+}));
+
+export const appUsersRelations = relations(appUsers, ({ many, one }) => ({
+  prompts: many(prompts),
+  preferences: many(userPreferences),
+  subscription: one(subscriptions, {
+    fields: [appUsers.id],
+    references: [subscriptions.userId],
+  }),
+}));
+
+export type AppUser = typeof appUsers.$inferSelect;
+export type UserPreference = typeof userPreferences.$inferSelect;
+export type Prompt = typeof prompts.$inferSelect;
+export type PromptVersion = typeof promptVersions.$inferSelect;
+export type OptimisationRun = typeof optimisationRuns.$inferSelect;
+export type Feedback = typeof feedback.$inferSelect;
+export type UsageEvent = typeof usageEvents.$inferSelect;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type DeletionJob = typeof deletionJobs.$inferSelect;
