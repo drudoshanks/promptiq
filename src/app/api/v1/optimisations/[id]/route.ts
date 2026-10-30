@@ -2,6 +2,7 @@ import { notFound } from "@/lib/api/errors";
 import { ok, withApi } from "@/lib/api/handler";
 import { idParamSchema } from "@/lib/api/validation";
 import { db } from "@/lib/db/client";
+import { listEstimatesForRun, listUsageForRun, serialiseTokenEstimate, summariseUsage } from "@/lib/services/estimates";
 import { getFeedbackForRun, serialiseFeedback } from "@/lib/services/feedback";
 import { getPrompt, serialiseVersion } from "@/lib/services/prompts";
 import { getRun, serialiseRun } from "@/lib/services/usage";
@@ -30,6 +31,18 @@ export const GET = withApi<"required", { id: string }>({ auth: "required" }, asy
     }
   }
 
-  const fb = await getFeedbackForRun(db, user.id, id);
-  return ok({ ...serialiseRun(run), result, feedback: fb ? serialiseFeedback(fb) : null });
+  const [fb, usage, estimates] = await Promise.all([
+    getFeedbackForRun(db, user.id, id),
+    listUsageForRun(db, user.id, id),
+    listEstimatesForRun(db, user.id, id),
+  ]);
+  return ok({
+    ...serialiseRun(run),
+    result,
+    feedback: fb ? serialiseFeedback(fb) : null,
+    /** What the provider reported for PromptIQ's own call(s). */
+    actual_usage: summariseUsage(usage),
+    /** Text-token estimates PromptIQ computed for the target model. */
+    estimates: estimates.map(serialiseTokenEstimate),
+  });
 });

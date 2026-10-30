@@ -7,6 +7,7 @@ import {
   deletionJobs,
   feedback,
   prompts,
+  tokenEstimates,
   userPreferences,
   type DeletionJob,
 } from "@/lib/db/schema";
@@ -17,9 +18,10 @@ import type { Db } from "@/lib/db/types";
  *
  * 1. Caller has verified a fresh re-authentication.
  * 2. Create a deletion job, mark the account pending deletion.
- * 3. Delete prompts, versions, preferences and feedback (user content).
+ * 3. Delete prompts, versions, preferences, feedback and token estimates.
  * 4. Anonymise the profile and delete credentials/sessions (auth tables cascade).
- * 5. Keep optimisation_runs and usage_events (metadata only, no prompt text) as
+ * 5. Keep optimisation_runs, api_usage_records and usage_events (metadata only,
+ *    no prompt text) as
  *    the billing/abuse audit record required by §9.3; they reference the
  *    anonymised profile row.
  * 6. Backups expire on the documented schedule (docs/privacy-data-handling.md).
@@ -42,6 +44,7 @@ export async function requestAccountDeletion(db: Db, userId: string): Promise<De
       if (!user) throw new Error("User not found");
 
       await tx.delete(feedback).where(eq(feedback.userId, userId));
+      await tx.delete(tokenEstimates).where(eq(tokenEstimates.userId, userId));
       await tx.delete(prompts).where(eq(prompts.userId, userId)); // versions cascade
       await tx.delete(userPreferences).where(eq(userPreferences.userId, userId));
 

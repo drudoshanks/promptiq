@@ -2,23 +2,33 @@ import { createHash } from "node:crypto";
 
 import { AppError } from "@/lib/api/errors";
 import type { TaskCategory } from "@/lib/categories";
+import type { OutputLengthPreset } from "@/lib/config/estimates";
+import { DEFAULT_TARGET_MODEL, isSupportedModel } from "@/lib/config/models";
 import { HARD_MAX_PROMPT_CHARS, planFor } from "@/lib/config/plans";
-import { estimateCostUsd } from "@/lib/cost";
 import type { AppUser } from "@/lib/db/schema";
 import type { Db } from "@/lib/db/types";
 import type { RequestLogger } from "@/lib/logger";
-import { ProviderError, type OptimiserProvider, type ProviderUsage } from "@/lib/providers/types";
+import { ProviderError, type OptimiserProvider, type ProviderAttempt } from "@/lib/providers/types";
+import { sumUsage } from "@/lib/providers/usage";
+import {
+  compareTexts,
+  recordApiUsage,
+  recordTokenEstimate,
+  summariseUsage,
+  type TokenComparisonResult,
+} from "@/lib/services/estimates";
 import { listEnabledPreferences } from "@/lib/services/preferences";
 import { createPrompt } from "@/lib/services/prompts";
 import {
   assertQuotaAvailable,
+  finaliseRun,
   globalSpendTodayUsd,
   idempotencyKeyUsed,
   linkRunToVersions,
   recordRun,
   recordUsage,
 } from "@/lib/services/usage";
-import { estimateTokens, type TokenEstimateMethod } from "@/lib/tokens";
+import type { ApiUsageRecord, RunStatus } from "@/lib/db/schema";
 
 import { TEMPLATE_VERSION } from "./instructions";
 import { normalisePrompt } from "./normalise";
@@ -33,6 +43,9 @@ export interface OptimiseServiceInput {
     outputStyle?: "structured" | "natural";
     maxOutputTokens?: number;
     title?: string;
+    /** Model the user will run the prompt on; drives the token/cost estimate only. */
+    targetModel?: string;
+    expectedOutput?: OutputLengthPreset | number;
   };
 }
 
@@ -46,13 +59,19 @@ export interface OptimisationResponse {
   clarification_needed: boolean;
   clarifying_questions: string[];
   quality_risks: string[];
-  token_estimate: { before: number; after: number; method: TokenEstimateMethod };
+  /** Kept for API compatibility: counts from the target model's tokenizer. */
+  token_estimate: { before: number; after: number; method: string };
+  /** Original vs optimised counts and cost for the target model. Estimates only. */
+  estimate: TokenComparisonResult;
+  /** PromptIQ's own optimisation call(s), as reported by the provider. */
   usage: {
     input_tokens: number | null;
     output_tokens: number | null;
     cached_input_tokens: number | null;
     source: "provider" | "unavailable";
   };
+  actual_usage: ReturnType<typeof summariseUsage>;
+  /** Actual cost of PromptIQ's optimisation call(s), priced with the snapshot in force. */
   estimated_cost_usd: number | null;
   model_id: string;
   template_version: string;
@@ -86,9 +105,44 @@ export function userKeyFor(userId: string): string {
   return createHash("sha256").update(`promptiq:${userId}`).digest("hex").slice(0, 32);
 }
 
+const REQUEST_TYPE = "prompt_optimisation";
+
 /**
- * Optimisation pipeline (SRS §7.1). Every failure path records a run with the
- * right status and throws an AppError with a safe, actionable code (§10.6).
+ * Write one api_usage_records row per provider attempt and return the totals.
+ * (run_id, attempt) is unique, so a repeated write can never double-count.
+ */
+async function recordAttempts(db: Db, userId: string, runId: string, provider: string, attempts: ProviderAttempt[]) {
+  const records: ApiUsageRecord[] = [];
+  let pricingVersion: string | null = null;
+  for (const a of attempts) {
+    const recorded = await recordApiUsage(db, {
+      userId,
+      runId,
+      attempt: a.attempt,
+      provider,
+      modelId: a.modelId,
+      requestType: REQUEST_TYPE,
+      providerRequestId: a.providerRequestId ?? null,
+      status: a.status,
+      inputTokens: a.usage?.inputTokens ?? 0,
+      outputTokens: a.usage?.outputTokens ?? 0,
+      cachedInputTokens: a.usage?.cachedInputTokens ?? null,
+      usageReported: a.usage !== null,
+    });
+    if (recorded) {
+      records.push(recorded.record);
+      pricingVersion ??= recorded.record.pricingVersion;
+    }
+  }
+  const usage = sumUsage(attempts.map((a) => a.usage));
+  const summary = summariseUsage(records);
+  return { records, usage, summary, pricingVersion, attemptCount: Math.max(1, attempts.length) };
+}
+
+/**
+ * Optimisation pipeline (SRS §7.1). Every failure path finalises the run with
+ * the right status and the usage the provider reported, then throws an AppError
+ * with a safe, actionable code (§10.6).
  */
 export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: OptimiseServiceInput): Promise<OptimisationResponse> {
   const { db, user, provider, log } = ctx;
@@ -103,6 +157,10 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
       details: { limit: plan.maxPromptChars, length: prompt.length, upgrade_available: user.planCode === "free" },
     });
   }
+  const targetModel = input.options?.targetModel ?? DEFAULT_TARGET_MODEL;
+  if (!isSupportedModel(targetModel)) {
+    throw new AppError("UNSUPPORTED_MODEL", `Token estimates are not available for model "${targetModel}".`);
+  }
 
   // Idempotent replay / duplicate protection.
   if (ctx.idempotencyKey) {
@@ -110,9 +168,7 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
     if (cached && cached.expiresAt > Date.now()) return cached.response;
     const used = await idempotencyKeyUsed(db, replayKey(user.id, ctx.idempotencyKey));
     if (used) {
-      throw new AppError("CONFLICT", "This request was already processed.", {
-        details: { optimisation_id: used.runId },
-      });
+      throw new AppError("CONFLICT", "This request was already processed.", { details: { optimisation_id: used.runId } });
     }
   }
 
@@ -139,6 +195,40 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
 
   const maxOutputTokens = Math.min(ctx.maxOutputTokensCeiling, Math.max(300, input.options?.maxOutputTokens ?? ctx.maxOutputTokensCeiling));
 
+  // The logical operation exists before the provider is called, so every
+  // attempt (including ones that fail) can be attributed to it.
+  const run = await recordRun(db, {
+    userId: user.id,
+    provider: provider.name,
+    modelId: provider.modelId,
+    templateVersion: TEMPLATE_VERSION,
+    taskCategory: input.taskCategory === "auto" ? null : input.taskCategory,
+    status: "queued",
+    inputChars: prompt.length,
+    latencyMs: 0,
+    requestId: ctx.requestId,
+  });
+
+  const close = async (status: RunStatus, attempts: ProviderAttempt[], extra: { modelId?: string; errorCode?: string | null; taskCategory?: string | null; outputChars?: number | null; requestId?: string | null } = {}) => {
+    const totals = await recordAttempts(db, user.id, run.id, provider.name, attempts);
+    const finalised = await finaliseRun(db, run.id, {
+      status,
+      modelId: extra.modelId ?? provider.modelId,
+      ...(extra.taskCategory !== undefined ? { taskCategory: extra.taskCategory } : {}),
+      outputChars: extra.outputChars ?? null,
+      inputTokens: totals.usage?.inputTokens ?? null,
+      outputTokens: totals.usage?.outputTokens ?? null,
+      cachedInputTokens: totals.usage ? (totals.usage.cachedInputTokens ?? 0) : null,
+      costUsd: totals.summary.actual_cost,
+      pricingVersion: totals.pricingVersion,
+      attemptCount: totals.attemptCount,
+      latencyMs: Date.now() - startedAt,
+      ...(extra.requestId !== undefined ? { requestId: extra.requestId } : {}),
+      errorCode: extra.errorCode ?? null,
+    });
+    return { totals, run: finalised };
+  };
+
   // 4–5. Provider call.
   let result;
   try {
@@ -151,22 +241,11 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
       userKey: userKeyFor(user.id),
     });
   } catch (error) {
-    const latencyMs = Date.now() - startedAt;
     const code = error instanceof ProviderError ? error.code : "PROVIDER_UNAVAILABLE";
     const reason = error instanceof ProviderError ? error.reason : "unknown";
-    await recordRun(db, {
-      userId: user.id,
-      provider: provider.name,
-      modelId: provider.modelId,
-      templateVersion: TEMPLATE_VERSION,
-      taskCategory: input.taskCategory === "auto" ? null : input.taskCategory,
-      status: "failed",
-      inputChars: prompt.length,
-      latencyMs,
-      requestId: ctx.requestId,
-      errorCode: `${code}:${reason}`,
-    });
-    log.warn("optimisation failed", { code, reason, latency_ms: latencyMs, model_id: provider.modelId });
+    const attempts = error instanceof ProviderError ? error.attempts : [];
+    await close("failed", attempts, { errorCode: `${code}:${reason}` });
+    log.warn("optimisation failed", { code, reason, attempts: attempts.length, latency_ms: Date.now() - startedAt, model_id: provider.modelId });
     const retryAfter = error instanceof ProviderError ? error.retryAfterSeconds : undefined;
     throw new AppError(
       code,
@@ -177,63 +256,45 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
     );
   }
 
-  const latencyMs = Date.now() - startedAt;
-  const usage = normaliseUsage(result.usage);
-  const estimatedCost = usage.input_tokens !== null && usage.output_tokens !== null
-    ? estimateCostUsd(result.modelId, {
-        inputTokens: usage.input_tokens,
-        cachedInputTokens: usage.cached_input_tokens ?? 0,
-        outputTokens: usage.output_tokens,
-      })
-    : null;
-
-  const baseRun = {
-    userId: user.id,
-    provider: provider.name,
-    modelId: result.modelId,
-    templateVersion: TEMPLATE_VERSION,
-    taskCategory: input.taskCategory === "auto" ? null : input.taskCategory,
-    inputChars: prompt.length,
-    inputTokens: usage.input_tokens,
-    outputTokens: usage.output_tokens,
-    cachedInputTokens: usage.cached_input_tokens,
-    estimatedCostUsd: estimatedCost,
-    latencyMs,
-    requestId: result.providerRequestId ?? ctx.requestId,
-  };
+  const requestId = result.providerRequestId ?? ctx.requestId;
 
   // 6. Refusal / incomplete / malformed output: safe errors, no success record.
   if (result.kind === "refused") {
-    await recordRun(db, { ...baseRun, status: "refused", errorCode: "OPTIMISATION_REFUSED" });
-    log.info("optimisation refused", { latency_ms: latencyMs, model_id: result.modelId });
+    await close("refused", result.attempts, { modelId: result.modelId, errorCode: "OPTIMISATION_REFUSED", requestId });
+    log.info("optimisation refused", { model_id: result.modelId });
     throw new AppError("OPTIMISATION_REFUSED", "The optimiser declined to rewrite this prompt. Your original text is unchanged.", {
       details: { reason: result.reason.slice(0, 300) },
     });
   }
   if (result.kind === "incomplete") {
-    await recordRun(db, { ...baseRun, status: "incomplete", errorCode: `INCOMPLETE:${result.reason}` });
-    log.warn("optimisation incomplete", { reason: result.reason, latency_ms: latencyMs });
+    await close("incomplete", result.attempts, { modelId: result.modelId, errorCode: `INCOMPLETE:${result.reason}`, requestId });
+    log.warn("optimisation incomplete", { reason: result.reason });
     throw new AppError("INVALID_MODEL_OUTPUT", "The optimiser returned an incomplete result. Try a shorter prompt or try again.", {
       details: { reason: result.reason },
     });
   }
   if (result.kind === "invalid_output") {
-    await recordRun(db, { ...baseRun, status: "failed", errorCode: "INVALID_MODEL_OUTPUT" });
-    log.error("optimiser output invalid", { reason: result.reason, latency_ms: latencyMs });
+    await close("failed", result.attempts, { modelId: result.modelId, errorCode: "INVALID_MODEL_OUTPUT", requestId });
+    log.error("optimiser output invalid", { reason: result.reason });
     throw new AppError("INVALID_MODEL_OUTPUT", "The optimiser returned an unexpected result. Please try again.");
   }
 
-  // 7. Advisory token estimates from the server-side tokenizer, not the model.
   const output = result.output;
-  const before = estimateTokens(prompt);
-  const after = estimateTokens(output.optimised_prompt);
   const taskCategory: TaskCategory = output.task_category;
-
-  const run = await recordRun(db, {
-    ...baseRun,
+  const { totals, run: finalRun } = await close("succeeded", result.attempts, {
+    modelId: result.modelId,
     taskCategory,
-    status: "succeeded",
     outputChars: output.optimised_prompt.length,
+    requestId,
+  });
+
+  // 7. Token comparison and cost estimate for the target model. Server-side
+  // tokenizer counts; the model's own token estimates are ignored (§7.3).
+  const estimate = await compareTexts(db, {
+    original: prompt,
+    optimised: output.optimised_prompt,
+    modelId: targetModel,
+    expectedOutput: input.options?.expectedOutput,
   });
 
   // 8. History (only when enabled; FR-009, A-07).
@@ -242,7 +303,7 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
   const wantsSave = input.options?.saveToHistory ?? true;
   if (user.historyEnabled && wantsSave) {
     try {
-      const saved = await createPrompt(db, user.id, plan, {
+      const savedPrompt = await createPrompt(db, user.id, plan, {
         title: input.options?.title,
         category: taskCategory,
         versions: [
@@ -250,11 +311,11 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
           { promptText: output.optimised_prompt, provenance: "ai_optimised", changeSummary: output.change_summary },
         ],
       });
-      const [original, optimised] = saved.versions;
+      const [original, optimised] = savedPrompt.versions;
       if (original && optimised) {
-        savedPromptId = saved.id;
+        savedPromptId = savedPrompt.id;
         savedVersionIds = { original: original.id, optimised: optimised.id };
-        await linkRunToVersions(db, run.id, { promptId: saved.id, sourceVersionId: original.id, resultVersionId: optimised.id });
+        await linkRunToVersions(db, run.id, { promptId: savedPrompt.id, sourceVersionId: original.id, resultVersionId: optimised.id });
       }
     } catch (error) {
       // A full library must not lose the optimisation result: return it unsaved.
@@ -266,14 +327,37 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
     }
   }
 
-  // 9. Consume quota exactly once.
+  // Persist the two estimates once per optimisation (never per keystroke).
+  const asEstimate = (side: "original" | "optimised") => ({
+    ...estimate[side],
+    cost: estimate.cost
+      ? {
+          expected_output_tokens: estimate.cost.expected_output_tokens,
+          expected_output_preset: estimate.cost.expected_output_preset,
+          input_cost: side === "original" ? estimate.cost.input_cost_before : estimate.cost.input_cost_after,
+          output_cost: estimate.cost.output_cost,
+          total_cost: side === "original" ? estimate.cost.total_cost_before : estimate.cost.total_cost_after,
+          currency: estimate.cost.currency,
+          pricing_version: estimate.cost.pricing_version,
+          pricing_status: estimate.cost.pricing_status,
+          pricing_verified_at: estimate.cost.pricing_verified_at,
+          calculated_at: estimate.cost.calculated_at,
+        }
+      : null,
+    pricing_warning: estimate.pricing_warning,
+    limitations: estimate.limitations,
+  });
+  await recordTokenEstimate(db, { userId: user.id, label: "original", runId: run.id, promptVersionId: savedVersionIds?.original ?? null, estimate: asEstimate("original") });
+  await recordTokenEstimate(db, { userId: user.id, label: "optimised", runId: run.id, promptVersionId: savedVersionIds?.optimised ?? null, estimate: asEstimate("optimised") });
+
+  // 9. Consume quota exactly once per logical operation, with the summed usage.
   await recordUsage(db, {
     userId: user.id,
     runId: run.id,
     idempotencyKey: ctx.idempotencyKey ? replayKey(user.id, ctx.idempotencyKey) : null,
-    inputTokens: usage.input_tokens ?? before.tokens,
-    outputTokens: usage.output_tokens ?? after.tokens,
-    costUsd: estimatedCost ?? 0,
+    inputTokens: totals.usage?.inputTokens ?? 0,
+    outputTokens: totals.usage?.outputTokens ?? 0,
+    costUsd: totals.summary.actual_cost ?? 0,
   });
 
   log.info("optimisation succeeded", {
@@ -281,11 +365,14 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
     model_id: result.modelId,
     template_version: TEMPLATE_VERSION,
     task_category: taskCategory,
-    latency_ms: latencyMs,
-    input_tokens: usage.input_tokens,
-    output_tokens: usage.output_tokens,
-    cached_input_tokens: usage.cached_input_tokens,
-    estimated_cost_usd: estimatedCost,
+    latency_ms: finalRun.latencyMs,
+    attempts: totals.attemptCount,
+    input_tokens: totals.usage?.inputTokens ?? null,
+    output_tokens: totals.usage?.outputTokens ?? null,
+    cached_input_tokens: totals.usage?.cachedInputTokens ?? null,
+    actual_cost_usd: totals.summary.actual_cost,
+    pricing_version: totals.pricingVersion,
+    target_model: estimate.model,
     saved: Boolean(savedPromptId),
   });
 
@@ -299,12 +386,19 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
     clarification_needed: output.clarification_needed,
     clarifying_questions: output.clarifying_questions,
     quality_risks: output.quality_risks,
-    token_estimate: { before: before.tokens, after: after.tokens, method: before.method },
-    usage,
-    estimated_cost_usd: estimatedCost,
+    token_estimate: { before: estimate.original.token_count, after: estimate.optimised.token_count, method: `tokenizer:${estimate.encoding}` },
+    estimate,
+    usage: {
+      input_tokens: totals.usage?.inputTokens ?? null,
+      output_tokens: totals.usage?.outputTokens ?? null,
+      cached_input_tokens: totals.usage ? (totals.usage.cachedInputTokens ?? 0) : null,
+      source: totals.usage ? "provider" : "unavailable",
+    },
+    actual_usage: totals.summary,
+    estimated_cost_usd: totals.summary.actual_cost,
     model_id: result.modelId,
     template_version: TEMPLATE_VERSION,
-    latency_ms: latencyMs,
+    latency_ms: finalRun.latencyMs ?? Date.now() - startedAt,
     saved_prompt_id: savedPromptId,
     saved_version_ids: savedVersionIds,
     preferences_applied: { effective, sources: resolution.sources },
@@ -318,14 +412,4 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
     }
   }
   return response;
-}
-
-function normaliseUsage(usage: ProviderUsage): OptimisationResponse["usage"] {
-  const has = typeof usage.inputTokens === "number" && typeof usage.outputTokens === "number";
-  return {
-    input_tokens: has ? (usage.inputTokens as number) : null,
-    output_tokens: has ? (usage.outputTokens as number) : null,
-    cached_input_tokens: has ? (usage.cachedInputTokens ?? 0) : null,
-    source: has ? "provider" : "unavailable",
-  };
 }

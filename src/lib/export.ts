@@ -1,5 +1,6 @@
 /**
- * Prompt export formats (FR-008, PIQ-010). Pure functions shared by the browser
+ * Prompt export formats (FR-008, PIQ-010). TXT is the prompt verbatim (no
+ * added newline) so it matches the text whose tokens were counted. Pure functions shared by the browser
  * (client-side download) and the server (GET /prompts/{id}/export). JSON exports
  * round-trip exactly; Markdown escapes fenced blocks so the prompt text is
  * recoverable verbatim.
@@ -68,7 +69,8 @@ function fenceFor(text: string): string {
 export function renderExport(prompt: ExportPrompt, version: ExportVersion, format: ExportFormat, exportedAt = new Date()): string {
   switch (format) {
     case "txt":
-      return version.prompt_text.endsWith("\n") ? version.prompt_text : `${version.prompt_text}\n`;
+      // Verbatim: the file is byte-for-byte the text that was token-counted.
+      return version.prompt_text;
     case "md": {
       const fence = fenceFor(version.prompt_text);
       const summary = version.change_summary.length

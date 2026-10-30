@@ -13,6 +13,8 @@ import { Dialog } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { CATEGORY_LABELS, TASK_CATEGORIES, type TaskCategory } from "@/lib/categories";
 import { api, errorMessage, triggerDownload } from "@/lib/client/api";
+import { recordFinalEstimate } from "@/lib/client/estimates";
+import { DEFAULT_OUTPUT_PRESET } from "@/lib/config/estimates";
 import type { PromptDetailResponse, SerialisedVersion } from "@/lib/client/types";
 import { EXPORT_FORMATS, exportFileName, exportMimeType, renderExport, type ExportFormat } from "@/lib/export";
 import { formatDateTime, formatNumber } from "@/lib/utils";
@@ -20,9 +22,11 @@ import { formatDateTime, formatNumber } from "@/lib/utils";
 interface PromptDetailProps {
   prompt: PromptDetailResponse;
   maxVersions: number;
+  /** Model the final count is recorded against at export. */
+  defaultModel: string;
 }
 
-export function PromptDetail({ prompt: initial, maxVersions }: PromptDetailProps) {
+export function PromptDetail({ prompt: initial, maxVersions, defaultModel }: PromptDetailProps) {
   const router = useRouter();
   const [prompt, setPrompt] = useState(initial);
   const versions = useMemo(() => [...prompt.versions].sort((a, b) => b.version_number - a.version_number), [prompt.versions]);
@@ -113,8 +117,14 @@ export function PromptDetail({ prompt: initial, maxVersions }: PromptDetailProps
     }
   }
 
-  function exportSelected() {
+  async function exportSelected() {
     if (!selected) return;
+    // Record the final count of exactly the text being exported; never block the export on it.
+    try {
+      await recordFinalEstimate({ model: defaultModel, text: selected.prompt_text, expectedOutput: DEFAULT_OUTPUT_PRESET, promptVersionId: selected.id });
+    } catch {
+      // informational only
+    }
     const body = renderExport(prompt, selected, format);
     triggerDownload(new Blob([body], { type: exportMimeType(format) }), exportFileName(prompt, selected, format));
   }
@@ -235,7 +245,7 @@ export function PromptDetail({ prompt: initial, maxVersions }: PromptDetailProps
                   </option>
                 ))}
               </Select>
-              <Button onClick={exportSelected}>Export</Button>
+              <Button onClick={() => void exportSelected()}>Export</Button>
             </span>
           </div>
 

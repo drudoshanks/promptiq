@@ -147,10 +147,15 @@ describe("optimisation pipeline (§7.1, §13.2)", () => {
 
   it("surfaces refusals and malformed output as safe errors without success records", async () => {
     const user = await createUser(t.db, "pipeline-refusal");
-    const refusing = new ScriptedProvider(async () => ({ kind: "refused", reason: "cannot help", usage: { inputTokens: 10, outputTokens: 2 }, modelId: "scripted" }));
+    const refusing = new ScriptedProvider(async () => ({
+      kind: "refused",
+      reason: "cannot help",
+      modelId: "scripted",
+      attempts: [{ attempt: 1, status: "refused", modelId: "scripted", usage: { inputTokens: 10, outputTokens: 2, totalTokens: 12, cachedInputTokens: null } }],
+    }));
     await expect(optimisePromptForUser(ctx(user, { provider: refusing }), { prompt: "do something", taskCategory: "general" })).rejects.toMatchObject({ code: "OPTIMISATION_REFUSED" });
 
-    const invalid = new ScriptedProvider(async () => ({ kind: "invalid_output", reason: "not json", usage: {}, modelId: "scripted" }));
+    const invalid = new ScriptedProvider(async () => ({ kind: "invalid_output", reason: "not json", modelId: "scripted", attempts: [] }));
     const error = await optimisePromptForUser(ctx(user, { provider: invalid }), { prompt: "do something", taskCategory: "general" }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(AppError);
     expect((error as AppError).code).toBe("INVALID_MODEL_OUTPUT");

@@ -144,6 +144,8 @@ export interface RecordRunInput {
   outputTokens?: number | null;
   cachedInputTokens?: number | null;
   estimatedCostUsd?: number | null;
+  pricingVersion?: string | null;
+  attemptCount?: number;
   latencyMs: number;
   requestId?: string | null;
   errorCode?: string | null;
@@ -169,6 +171,8 @@ export async function recordRun(db: DbOrTx, input: RecordRunInput): Promise<Opti
       outputTokens: input.outputTokens ?? null,
       cachedInputTokens: input.cachedInputTokens ?? null,
       estimatedCostUsd: input.estimatedCostUsd === null || input.estimatedCostUsd === undefined ? null : input.estimatedCostUsd.toFixed(6),
+      pricingVersion: input.pricingVersion ?? null,
+      attemptCount: Math.max(1, input.attemptCount ?? 1),
       latencyMs: input.latencyMs,
       requestId: input.requestId ?? null,
       errorCode: input.errorCode ?? null,
@@ -178,6 +182,51 @@ export async function recordRun(db: DbOrTx, input: RecordRunInput): Promise<Opti
     })
     .returning();
   if (!run) throw new Error("Failed to record run");
+  return run;
+}
+
+export interface FinaliseRunInput {
+  status: RunStatus;
+  modelId: string;
+  taskCategory?: string | null;
+  outputChars?: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cachedInputTokens: number | null;
+  /** Sum of the attempts' actual cost; null when any attempt could not be priced. */
+  costUsd: number | null;
+  pricingVersion: string | null;
+  attemptCount: number;
+  latencyMs: number;
+  requestId?: string | null;
+  errorCode?: string | null;
+}
+
+/**
+ * Close a logical optimisation run with the totals of all its provider attempts
+ * (the per-attempt detail lives in api_usage_records).
+ */
+export async function finaliseRun(db: DbOrTx, runId: string, input: FinaliseRunInput): Promise<OptimisationRun> {
+  const [run] = await db
+    .update(optimisationRuns)
+    .set({
+      status: input.status,
+      modelId: input.modelId,
+      ...(input.taskCategory !== undefined ? { taskCategory: input.taskCategory } : {}),
+      outputChars: input.outputChars ?? null,
+      inputTokens: input.inputTokens,
+      outputTokens: input.outputTokens,
+      cachedInputTokens: input.cachedInputTokens,
+      estimatedCostUsd: input.costUsd === null ? null : input.costUsd.toFixed(6),
+      pricingVersion: input.pricingVersion,
+      attemptCount: Math.max(1, input.attemptCount),
+      latencyMs: input.latencyMs,
+      ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
+      errorCode: input.errorCode ?? null,
+    })
+    .where(eq(optimisationRuns.id, runId))
+    .returning();
+  if (!run) throw new Error("Failed to finalise run");
   return run;
 }
 
@@ -249,7 +298,11 @@ export function serialiseRun(run: OptimisationRun) {
       cached_input_tokens: run.cachedInputTokens,
       source: run.inputTokens === null ? "unavailable" : "provider",
     },
+    /** Actual usage from the provider, priced with pricing_version (USD). */
+    actual_cost_usd: run.estimatedCostUsd === null ? null : Number(run.estimatedCostUsd),
     estimated_cost_usd: run.estimatedCostUsd === null ? null : Number(run.estimatedCostUsd),
+    pricing_version: run.pricingVersion,
+    attempt_count: run.attemptCount,
     latency_ms: run.latencyMs,
     error_code: run.errorCode,
     created_at: run.createdAt.toISOString(),

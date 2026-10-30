@@ -8,7 +8,9 @@ import { Dialog } from "@/components/ui/dialog";
 import { Field, Input, Select } from "@/components/ui/field";
 import { CATEGORY_LABELS, TASK_CATEGORIES, type TaskCategory } from "@/lib/categories";
 import { api, errorMessage, triggerDownload } from "@/lib/client/api";
+import { recordFinalEstimate } from "@/lib/client/estimates";
 import type { PromptDetailResponse, SerialisedVersion } from "@/lib/client/types";
+import type { OutputLengthPreset } from "@/lib/config/estimates";
 import { EXPORT_FORMATS, exportFileName, exportMimeType, renderExport, type ExportFormat } from "@/lib/export";
 
 export interface SaveExportInput {
@@ -20,6 +22,10 @@ export interface SaveExportInput {
   /** When the optimisation was auto-saved, new edits become versions of it. */
   savedPromptId: string | null;
   savedVersionIds: { original: string; optimised: string } | null;
+  optimisationId: string;
+  /** Model and answer-length assumption used for the final count recorded at export. */
+  targetModel: string;
+  outputPreset: OutputLengthPreset;
 }
 
 interface SaveExportDialogProps {
@@ -99,7 +105,24 @@ export function SaveExportDialog({ open, mode, onClose, input, onSaved }: SaveEx
     }
   }
 
-  function exportNow() {
+  async function exportNow() {
+    setBusy(true);
+    setError(null);
+    // The exported text is exactly the text counted here (§7, test 13).
+    const exportText = input.finalText;
+    let countNote: string | null = null;
+    try {
+      await recordFinalEstimate({
+        model: input.targetModel,
+        text: exportText,
+        expectedOutput: input.outputPreset,
+        runId: input.optimisationId,
+        promptVersionId: !edited ? (input.savedVersionIds?.optimised ?? null) : null,
+      });
+    } catch (err) {
+      // Counting is informational: never block the user's export on it.
+      countNote = `Exported, but the final token count could not be recorded: ${errorMessage(err)}`;
+    }
     const now = new Date();
     const prompt = {
       id: input.savedPromptId ?? "unsaved",
@@ -113,13 +136,15 @@ export function SaveExportDialog({ open, mode, onClose, input, onSaved }: SaveEx
       id: "current",
       version_number: edited ? 3 : 2,
       provenance: edited ? "user_edited" : "ai_optimised",
-      prompt_text: input.finalText,
+      prompt_text: exportText,
       change_summary: input.changeSummary,
       created_at: now.toISOString(),
     };
     const body = renderExport(prompt, version, format, now);
     triggerDownload(new Blob([body], { type: exportMimeType(format) }), exportFileName(prompt, version, format));
-    onClose();
+    setBusy(false);
+    if (countNote) setError(countNote);
+    else onClose();
   }
 
   const isSave = mode === "save";
@@ -139,7 +164,7 @@ export function SaveExportDialog({ open, mode, onClose, input, onSaved }: SaveEx
               {input.savedPromptId ? "Save version" : "Save prompt"}
             </Button>
           ) : (
-            <Button variant="primary" onClick={exportNow}>
+            <Button variant="primary" loading={busy} onClick={() => void exportNow()}>
               Download {format.toUpperCase()}
             </Button>
           )}

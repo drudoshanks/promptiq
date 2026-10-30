@@ -214,7 +214,10 @@ export const optimisationRuns = pgTable(
     inputTokens: integer("input_tokens"),
     outputTokens: integer("output_tokens"),
     cachedInputTokens: integer("cached_input_tokens"),
+    /** Sum of the actual cost of every provider attempt, priced with pricing_version. */
     estimatedCostUsd: numeric("estimated_cost_usd", { precision: 12, scale: 6 }),
+    pricingVersion: text("pricing_version"),
+    attemptCount: integer("attempt_count").notNull().default(1),
     latencyMs: integer("latency_ms"),
     requestId: text("request_id"),
     errorCode: text("error_code"),
@@ -223,6 +226,98 @@ export const optimisationRuns = pgTable(
   (t) => [
     index("idx_runs_user_created").on(t.userId, t.createdAt),
     index("idx_runs_status_created").on(t.status, t.createdAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Token & cost estimation engine (migration 0003)
+// ---------------------------------------------------------------------------
+export const modelPricing = pgTable(
+  "model_pricing",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    provider: text("provider").notNull(),
+    modelId: text("model_id").notNull(),
+    pricingVersion: text("pricing_version").notNull().unique(),
+    currency: text("currency").notNull().default("USD"),
+    inputPerMillion: numeric("input_per_million", { precision: 12, scale: 6 }).notNull(),
+    cachedInputPerMillion: numeric("cached_input_per_million", { precision: 12, scale: 6 }),
+    outputPerMillion: numeric("output_per_million", { precision: 12, scale: 6 }).notNull(),
+    extraPrices: jsonb("extra_prices").$type<Record<string, number>>().notNull().default({}),
+    effectiveFrom: tz("effective_from").notNull(),
+    effectiveTo: tz("effective_to"),
+    source: text("source").notNull(),
+    verifiedAt: tz("verified_at").notNull(),
+    notes: text("notes"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("idx_model_pricing_lookup").on(t.provider, t.modelId, t.effectiveFrom)],
+);
+
+export const ESTIMATE_LABELS = ["original", "optimised", "final", "adhoc"] as const;
+export type EstimateLabel = (typeof ESTIMATE_LABELS)[number];
+
+export const tokenEstimates = pgTable(
+  "token_estimates",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    promptVersionId: uuid("prompt_version_id").references(() => promptVersions.id, { onDelete: "set null" }),
+    runId: uuid("run_id").references(() => optimisationRuns.id, { onDelete: "set null" }),
+    label: text("label", { enum: ESTIMATE_LABELS }).notNull(),
+    modelId: text("model_id").notNull(),
+    encoding: text("encoding").notNull(),
+    tokenizerVersion: text("tokenizer_version").notNull(),
+    inputTokens: integer("input_tokens").notNull(),
+    characterCount: integer("character_count").notNull(),
+    expectedOutputTokens: integer("expected_output_tokens").notNull(),
+    estimatedInputCost: numeric("estimated_input_cost", { precision: 16, scale: 10 }),
+    estimatedOutputCost: numeric("estimated_output_cost", { precision: 16, scale: 10 }),
+    estimatedTotalCost: numeric("estimated_total_cost", { precision: 16, scale: 10 }),
+    pricingVersion: text("pricing_version"),
+    currency: text("currency").notNull().default("USD"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("idx_token_estimates_user_created").on(t.userId, t.createdAt),
+    index("idx_token_estimates_version").on(t.promptVersionId),
+    index("idx_token_estimates_run").on(t.runId),
+  ],
+);
+
+export const USAGE_RECORD_STATUSES = ["ok", "refused", "incomplete", "invalid_output", "error"] as const;
+export type UsageRecordStatus = (typeof USAGE_RECORD_STATUSES)[number];
+
+export const apiUsageRecords = pgTable(
+  "api_usage_records",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").references(() => optimisationRuns.id, { onDelete: "set null" }),
+    attempt: integer("attempt").notNull().default(1),
+    provider: text("provider").notNull(),
+    modelId: text("model_id").notNull(),
+    requestType: text("request_type").notNull(),
+    providerRequestId: text("provider_request_id"),
+    status: text("status", { enum: USAGE_RECORD_STATUSES }).notNull(),
+    usageReported: boolean("usage_reported").notNull().default(true),
+    actualInputTokens: integer("actual_input_tokens").notNull(),
+    actualOutputTokens: integer("actual_output_tokens").notNull(),
+    actualTotalTokens: integer("actual_total_tokens").notNull(),
+    cachedInputTokens: integer("cached_input_tokens"),
+    actualCost: numeric("actual_cost", { precision: 16, scale: 10 }),
+    pricingVersion: text("pricing_version"),
+    currency: text("currency").notNull().default("USD"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    unique("api_usage_records_run_id_attempt_key").on(t.runId, t.attempt),
+    index("idx_api_usage_user_created").on(t.userId, t.createdAt),
+    index("idx_api_usage_model_created").on(t.modelId, t.createdAt),
   ],
 );
 
@@ -362,3 +457,6 @@ export type Feedback = typeof feedback.$inferSelect;
 export type UsageEvent = typeof usageEvents.$inferSelect;
 export type Subscription = typeof subscriptions.$inferSelect;
 export type DeletionJob = typeof deletionJobs.$inferSelect;
+export type ModelPricing = typeof modelPricing.$inferSelect;
+export type TokenEstimate = typeof tokenEstimates.$inferSelect;
+export type ApiUsageRecord = typeof apiUsageRecords.$inferSelect;
