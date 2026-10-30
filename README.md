@@ -27,7 +27,7 @@ Docker needed; safe to re-run):
 
 ```bash
 bash scripts/setup-mac.sh       # or run the downloaded script before cloning
-cd ~/Desktop/promptiq && npm run dev# http://localhost:3000
+cd ~/Desktop/promptiq && npm run dev   # http://localhost:3000
 ```
 
 **Any OS, by hand** (uses Docker for PostgreSQL):
