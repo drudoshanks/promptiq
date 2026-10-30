@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { PromptDetail } from "@/components/library/prompt-detail";
 import { getCurrentUser } from "@/lib/auth/session";
+import { DEFAULT_TARGET_MODEL } from "@/lib/config/models";
 import { planFor } from "@/lib/config/plans";
 import { db } from "@/lib/db/client";
 import { isUuid } from "@/lib/db/scope";
@@ -27,6 +28,7 @@ export default async function PromptPage({ params }: { params: Promise<{ id: str
     <PromptDetail
       prompt={{ ...serialisePrompt(prompt), versions: prompt.versions.map(serialiseVersion) }}
       maxVersions={planFor(user.planCode).maxVersionsPerPrompt}
+      defaultModel={DEFAULT_TARGET_MODEL}
     />
   );
 }

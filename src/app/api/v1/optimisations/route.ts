@@ -33,6 +33,8 @@ export const POST = withApi({ auth: "required", rateLimit: "optimisePerMinute" }
             outputStyle: body.options.output_style,
             maxOutputTokens: body.options.max_output_tokens,
             title: body.options.title,
+            targetModel: body.options.target_model,
+            expectedOutput: body.options.expected_output,
           }
         : undefined,
     },

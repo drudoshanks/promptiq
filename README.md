@@ -44,7 +44,7 @@ Useful commands:
 
 ```bash
 npm run check        # lint + typecheck + tests
-npm test             # 68 unit/database tests, no services required
+npm test             # unit, database, route and component tests; no services required
 npm run build        # production build (standalone server)
 npm run eval         # evaluation harness; writes eval/reports/*.json
 npm run test:e2e     # Playwright critical flows (needs a database)
@@ -63,6 +63,15 @@ npm run test:e2e     # Playwright critical flows (needs a database)
 | §13 testing | `tests/unit`, `tests/db` (ownership/IDOR, versioning, quota, idempotency, failure paths, deletion, billing), `tests/e2e`, `eval/` |
 | §14–16 delivery | `.github/workflows/ci.yml`, `Dockerfile`, `docs/deployment.md`, `docs/runbooks.md` |
 | §17 cost | `src/lib/cost.ts` with the price table in `src/lib/config/models.ts`; estimates are labelled everywhere |
+
+## Token & cost estimation
+
+Counts tokens per model (exact `o200k_base` tokenizer, no LLM call), compares
+original and optimised prompts, estimates cost from versioned database pricing,
+and records the provider's actual usage for every attempt PromptIQ makes. The
+full design, limitations and pricing operations are in
+[`docs/token-cost-estimation.md`](docs/token-cost-estimation.md). Add a verified
+rate with `npm run pricing:add`.
 
 ## Decisions and deviations from the SRS baseline
 

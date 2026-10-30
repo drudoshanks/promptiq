@@ -43,9 +43,15 @@ test("sign up, onboard, optimise, edit, copy, export, give feedback", async ({ p
   await expect(page.getByText("4471").first()).toBeVisible();
   await expect(page.getByText("What changed")).toBeVisible();
 
+  // Token & cost panel: original vs optimised, recounted after an edit.
+  await expect(page.getByTestId("tokens-original")).toHaveText(/\d+/);
+  const before = Number(await page.getByTestId("tokens-optimised").textContent());
+
   await page.getByRole("button", { name: "Edit proposal" }).click();
   const editor = page.getByLabel("Your version");
   await editor.fill((await editor.inputValue()) + "\n\nKeep it under 120 words.");
+  await expect.poll(async () => Number(await page.getByTestId("tokens-optimised").textContent())).toBeGreaterThan(before);
+  await expect(page.getByText(/cannot see your actual usage/)).toBeVisible();
   await page.getByRole("button", { name: "Done editing" }).click();
   await expect(page.getByRole("button", { name: "Reset to proposal" })).toBeVisible();
 

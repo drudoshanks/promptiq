@@ -22,9 +22,9 @@ const version = {
 };
 
 describe("exports round-trip (FR-008, PIQ-010)", () => {
-  it("TXT is the verbatim prompt with a final newline", () => {
+  it("TXT is the verbatim prompt, byte for byte (nothing appended)", () => {
     expect(renderExport(prompt, version, "txt")).toBe(version.prompt_text);
-    expect(renderExport(prompt, { ...version, prompt_text: "no newline" }, "txt")).toBe("no newline\n");
+    expect(renderExport(prompt, { ...version, prompt_text: "no newline" }, "txt")).toBe("no newline");
   });
 
   it("JSON parses back to the same prompt and version", () => {

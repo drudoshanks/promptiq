@@ -44,6 +44,20 @@ Next.js 16 works (Vercel, Fly.io, Render, a container on your own VM).
   path already filters every query by the authenticated user; RLS is the second
   lock.
 
+## Pricing (token & cost estimation)
+
+Migration 0003 seeds verified prices for gpt-5-mini, gpt-5-nano and gpt-4o only.
+Before launch, and whenever OpenAI changes prices, record verified rates for any
+other model you want priced:
+
+```bash
+DATABASE_URL=… npm run pricing:add -- --model <id> --input <usd/1M> --cached <usd/1M> \
+  --output <usd/1M> --source <OpenAI pricing URL> --effective-from YYYY-MM-DD
+```
+
+Prices older than 90 days are flagged in the UI as possibly out of date. No new
+environment variables are required for the feature.
+
 ## Secrets
 
 `OPENAI_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `AUTH_SECRET`,

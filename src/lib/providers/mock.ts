@@ -102,15 +102,21 @@ export class MockOptimiserProvider implements OptimiserProvider {
       quality_risks: risks,
     };
 
+    // Deterministic stand-in for provider usage: instructions overhead + text.
+    const inputTokens = approximateTokens(request.prompt) + 600;
+    const outputTokens = approximateTokens(body) + 60;
     return {
       kind: "ok",
       output,
-      usage: {
-        inputTokens: approximateTokens(request.prompt) + 600,
-        outputTokens: approximateTokens(body) + 60,
-        cachedInputTokens: 0,
-      },
       modelId: this.modelId,
+      attempts: [
+        {
+          attempt: 1,
+          status: "ok",
+          modelId: this.modelId,
+          usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, cachedInputTokens: 0 },
+        },
+      ],
     };
   }
 }

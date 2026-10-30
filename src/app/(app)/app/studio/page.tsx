@@ -4,9 +4,11 @@ import { redirect } from "next/navigation";
 import { PromptStudio } from "@/components/studio/prompt-studio";
 import { getCurrentUser } from "@/lib/auth/session";
 import { isTaskCategory, type TaskCategory } from "@/lib/categories";
+import { DEFAULT_TARGET_MODEL } from "@/lib/config/models";
 import { planFor } from "@/lib/config/plans";
 import { db } from "@/lib/db/client";
 import { isUuid } from "@/lib/db/scope";
+import { listModelOptions } from "@/lib/services/estimates";
 import { listEnabledPreferences } from "@/lib/services/preferences";
 import { getPrompt } from "@/lib/services/prompts";
 
@@ -39,7 +41,10 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
     }
   }
 
-  const preferences = user.personalisationEnabled ? await listEnabledPreferences(db, user.id) : [];
+  const [preferences, models] = await Promise.all([
+    user.personalisationEnabled ? listEnabledPreferences(db, user.id) : Promise.resolve([]),
+    listModelOptions(db),
+  ]);
 
   return (
     <PromptStudio
@@ -49,6 +54,8 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
       historyEnabled={user.historyEnabled}
       personalisationEnabled={user.personalisationEnabled}
       savedPreferenceCount={preferences.length}
+      models={models}
+      defaultModel={DEFAULT_TARGET_MODEL}
     />
   );
 }

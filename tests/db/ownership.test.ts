@@ -27,13 +27,13 @@ afterAll(async () => {
 describe("migrations", () => {
   it("apply once and are idempotent", async () => {
     const rows = (await t.client.query("SELECT name FROM schema_migrations ORDER BY name")).rows as Array<{ name: string }>;
-    expect(rows.map((r) => r.name)).toEqual(["0001_init.sql", "0002_row_level_security.sql"]);
+    expect(rows.map((r) => r.name)).toEqual(["0001_init.sql", "0002_row_level_security.sql", "0003_token_cost_engine.sql"]);
   });
 
   it("create every table from SRS §9.1", async () => {
     const rows = (await t.client.query("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")).rows as Array<{ tablename: string }>;
     const names = rows.map((r) => r.tablename);
-    for (const table of ["app_users", "user_preferences", "prompts", "prompt_versions", "optimisation_runs", "feedback", "usage_events", "subscriptions", "webhook_events", "deletion_jobs"]) {
+    for (const table of ["app_users", "user_preferences", "prompts", "prompt_versions", "optimisation_runs", "feedback", "usage_events", "subscriptions", "webhook_events", "deletion_jobs", "model_pricing", "token_estimates", "api_usage_records"]) {
       expect(names).toContain(table);
     }
   });

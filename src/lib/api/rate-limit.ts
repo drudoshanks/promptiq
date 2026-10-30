@@ -66,8 +66,10 @@ export const RATE_LIMITS = {
   userPerMinute: { limit: 20, windowMs: 60_000 },
   /** Optimisation calls per authenticated user (provider budget protection). */
   optimisePerMinute: { limit: 8, windowMs: 60_000 },
-  /** Any API call per client IP. */
-  ipPerMinute: { limit: 60, windowMs: 60_000 },
+  /** Any API call per client IP (sized to allow debounced counting while typing). */
+  ipPerMinute: { limit: 240, windowMs: 60_000 },
+  /** Token counting while typing (debounced client-side, ~300 ms). */
+  estimatePerMinute: { limit: 120, windowMs: 60_000 },
   /** Account-wide expensive operations (exports). */
   exportPerHour: { limit: 5, windowMs: 3_600_000 },
 } as const;

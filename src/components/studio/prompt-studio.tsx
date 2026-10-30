@@ -5,15 +5,17 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DiffView } from "@/components/diff-view";
+import { TokenCostPanel } from "@/components/estimates/token-cost-panel";
 import { Alert } from "@/components/ui/alert";
-import { Badge, EstimateBadge } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Select, Textarea } from "@/components/ui/field";
 import { CATEGORY_LABELS, PREFERENCE_LABELS, TASK_CATEGORIES, type PreferenceKey, type TaskCategory } from "@/lib/categories";
 import { api, ApiError, errorMessage, newIdempotencyKey } from "@/lib/client/api";
+import type { ModelOption } from "@/lib/client/estimates";
 import type { OptimisationResponse, PromptDetailResponse } from "@/lib/client/types";
+import { DEFAULT_OUTPUT_PRESET, type OutputLengthPreset } from "@/lib/config/estimates";
 import { diffStats, diffWords } from "@/lib/diff";
-import { approximateTokens } from "@/lib/tokens";
 import { formatDate, formatNumber } from "@/lib/utils";
 
 import { FeedbackPanel } from "./feedback-panel";
@@ -26,11 +28,13 @@ interface PromptStudioProps {
   historyEnabled: boolean;
   personalisationEnabled: boolean;
   savedPreferenceCount: number;
+  models: ModelOption[];
+  defaultModel: string;
 }
 
 type Status = "idle" | "loading" | "done";
 
-export function PromptStudio({ initialText = "", initialCategory = "auto", maxPromptChars, historyEnabled, personalisationEnabled, savedPreferenceCount }: PromptStudioProps) {
+export function PromptStudio({ initialText = "", initialCategory = "auto", maxPromptChars, historyEnabled, personalisationEnabled, savedPreferenceCount, models, defaultModel }: PromptStudioProps) {
   const [text, setText] = useState(initialText);
   const [category, setCategory] = useState<TaskCategory | "auto">(initialCategory);
   const [status, setStatus] = useState<Status>("idle");
@@ -41,12 +45,13 @@ export function PromptStudio({ initialText = "", initialCategory = "auto", maxPr
   const [copied, setCopied] = useState(false);
   const [dialog, setDialog] = useState<"save" | "export" | null>(null);
   const [savedPrompt, setSavedPrompt] = useState<PromptDetailResponse | null>(null);
+  const [targetModel, setTargetModel] = useState(defaultModel);
+  const [outputPreset, setOutputPreset] = useState<OutputLengthPreset>(DEFAULT_OUTPUT_PRESET);
   const resultsRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const chars = text.length;
   const overLimit = chars > maxPromptChars;
-  const approxTokens = useMemo(() => approximateTokens(text), [text]);
   const stats = useMemo(() => (result ? diffStats(diffWords(result.original_prompt, finalText)) : null), [result, finalText]);
   const edited = result ? finalText.trim() !== result.optimised_prompt.trim() : false;
 
@@ -63,7 +68,7 @@ export function PromptStudio({ initialText = "", initialCategory = "auto", maxPr
       const data = await api<OptimisationResponse>("/api/v1/optimisations", {
         method: "POST",
         idempotencyKey: newIdempotencyKey(),
-        body: { prompt: text, task_category: category, options: { save_to_history: historyEnabled } },
+        body: { prompt: text, task_category: category, options: { save_to_history: historyEnabled, target_model: targetModel, expected_output: outputPreset } },
         signal: controller.signal,
       });
       setResult(data);
@@ -99,6 +104,9 @@ export function PromptStudio({ initialText = "", initialCategory = "auto", maxPr
         category: result.task_category,
         savedPromptId: savedPrompt?.id ?? result.saved_prompt_id,
         savedVersionIds: result.saved_version_ids,
+        optimisationId: result.optimisation_id,
+        targetModel,
+        outputPreset,
       }
     : null;
 
@@ -149,9 +157,6 @@ export function PromptStudio({ initialText = "", initialCategory = "auto", maxPr
             <span>
               {formatNumber(chars)} / {formatNumber(maxPromptChars)} characters
             </span>
-            <span className="inline-flex items-center gap-2">
-              about {formatNumber(approxTokens)} tokens <EstimateBadge />
-            </span>
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <Field label="Kind of task" className="min-w-56">
@@ -181,6 +186,17 @@ export function PromptStudio({ initialText = "", initialCategory = "auto", maxPr
         {!historyEnabled ? <p className="mt-4 text-sm text-ink-soft">History is off: this optimisation is not stored unless you save it.</p> : null}
       </section>
 
+      {!result || status === "idle" ? (
+        <TokenCostPanel
+          original={text}
+          models={models}
+          model={targetModel}
+          onModelChange={setTargetModel}
+          outputPreset={outputPreset}
+          onOutputPresetChange={setOutputPreset}
+        />
+      ) : null}
+
       {result && status !== "idle" ? (
         <section ref={resultsRef} tabIndex={-1} aria-labelledby="results-heading" className="space-y-6 outline-none">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -189,10 +205,6 @@ export function PromptStudio({ initialText = "", initialCategory = "auto", maxPr
             </h2>
             <div className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
               <Badge>{CATEGORY_LABELS[result.task_category]}</Badge>
-              <span>
-                tokens: {formatNumber(result.token_estimate.before)} before, {formatNumber(result.token_estimate.after)} after
-              </span>
-              <EstimateBadge method={result.token_estimate.method} />
               {stats ? (
                 <span>
                   {stats.added} added, {stats.removed} removed
@@ -253,6 +265,17 @@ export function PromptStudio({ initialText = "", initialCategory = "auto", maxPr
             </Button>
           </div>
 
+          <TokenCostPanel
+            original={result.original_prompt}
+            optimised={finalText}
+            models={models}
+            model={targetModel}
+            onModelChange={setTargetModel}
+            outputPreset={outputPreset}
+            onOutputPresetChange={setOutputPreset}
+            actualUsage={result.actual_usage}
+          />
+
           {savedPrompt || result.saved_prompt_id ? (
             <p className="text-sm text-ink-soft">
               Saved in your library{result.saved_prompt_id && !savedPrompt ? " automatically (history is on)" : ""}.{" "}
@@ -308,10 +331,7 @@ export function PromptStudio({ initialText = "", initialCategory = "auto", maxPr
                 <p className="mt-2 text-[0.9375rem] text-ink-soft">None. Anything you say in the prompt itself always wins over saved preferences.</p>
               )}
               <p className="mt-4 text-sm text-ink-faint">
-                {result.usage.source === "provider"
-                  ? `This call used ${formatNumber(result.usage.input_tokens ?? 0)} input and ${formatNumber(result.usage.output_tokens ?? 0)} output tokens (measured by the provider).`
-                  : "Provider token usage was not available for this call."}{" "}
-                Model {result.model_id}, template {result.template_version}, {formatNumber(result.latency_ms)} ms.
+                Optimised by {result.model_id}, template {result.template_version}, in {formatNumber(result.latency_ms)} ms.
               </p>
             </div>
           </div>
