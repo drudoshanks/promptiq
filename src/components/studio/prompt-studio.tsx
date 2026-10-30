@@ -183,7 +183,15 @@ export function PromptStudio({ initialText = "", initialCategory = "auto", maxPr
         </form>
 
         {error ? <ErrorNotice error={error} onRetry={optimise} /> : null}
-        {!historyEnabled ? <p className="mt-4 text-sm text-ink-soft">History is off: this optimisation is not stored unless you save it.</p> : null}
+        {!historyEnabled ? (
+          <p className="mt-4 text-sm text-ink-soft">
+            Auto-save is off: prompts are not stored unless you choose Save to library. <Link href="/app/settings">Change</Link>
+          </p>
+        ) : (
+          <p className="mt-4 text-sm text-ink-soft">
+            Auto-save is on: prompts you optimise are saved to My prompts. <Link href="/app/settings">Change</Link>
+          </p>
+        )}
       </section>
 
       {!result || status === "idle" ? (
@@ -275,6 +283,12 @@ export function PromptStudio({ initialText = "", initialCategory = "auto", maxPr
             onOutputPresetChange={setOutputPreset}
             actualUsage={result.actual_usage}
           />
+
+          {!savedPrompt && !result.saved_prompt_id ? (
+            <Alert tone="info" title="Keep this prompt?" action={<Button size="sm" onClick={() => setDialog("save")}>Save to library</Button>}>
+              Auto-save is off, so this optimisation is not stored. Save it to get suggestions, version history and token tracking.
+            </Alert>
+          ) : null}
 
           {savedPrompt || result.saved_prompt_id ? (
             <p className="text-sm text-ink-soft">

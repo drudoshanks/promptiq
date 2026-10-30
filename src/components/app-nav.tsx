@@ -10,7 +10,10 @@ import { cx } from "@/lib/utils";
 const LINKS = [
   { href: "/app", label: "Overview", exact: true },
   { href: "/app/studio", label: "Studio" },
-  { href: "/app/library", label: "Library" },
+  { href: "/app/library", label: "My prompts" },
+  { href: "/app/suggestions", label: "Suggestions" },
+  { href: "/app/history", label: "History" },
+  { href: "/app/analytics", label: "Analytics" },
   { href: "/app/preferences", label: "Preferences" },
   { href: "/app/usage", label: "Usage" },
   { href: "/app/settings", label: "Settings" },

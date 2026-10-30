@@ -94,9 +94,35 @@ test("preferences can be edited, disabled and deleted; settings toggles persist"
   await expect(page.getByText("No preferences yet")).toBeVisible();
 
   await page.goto("/app/settings");
-  await page.getByRole("switch", { name: "Keep a history of my prompts" }).click();
+  await page.getByRole("switch", { name: "Auto-save prompts I optimise" }).click();
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(page.getByText("Settings saved.")).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("switch", { name: "Keep a history of my prompts" })).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByRole("switch", { name: "Auto-save prompts I optimise" })).toHaveAttribute("aria-checked", "false");
+});
+
+test("library: analyse, accept a suggestion, optimise and save a new version", async ({ page }) => {
+  await page.goto("/sign-in");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
+
+  await page.goto("/app/library");
+  await page.getByRole("link", { name: /write me an email/ }).first().click();
+  await page.getByRole("button", { name: /Analyse/ }).first().click();
+  await expect(page.getByText(/heuristic indicator/i)).toBeVisible();
+
+  const accept = page.getByRole("button", { name: "Accept" }).first();
+  if (await accept.isVisible()) await accept.click();
+  await page.getByLabel(/Token saver/).check();
+  await page.getByRole("button", { name: "Optimise prompt" }).click();
+  await expect(page.getByLabel("Edit before saving")).toBeVisible();
+  await expect(page.getByTestId("tokens-optimised")).toHaveText(/\d+/);
+  await page.getByRole("button", { name: /Save as version/ }).click();
+  await expect(page.getByText(/Saved as a new version/)).toBeVisible();
+
+  await page.goto("/app/history");
+  await expect(page.getByText("saved as version").first()).toBeVisible();
+  await page.goto("/app");
+  await expect(page.getByText("Tokens saved")).toBeVisible();
 });

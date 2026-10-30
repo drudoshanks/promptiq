@@ -14,6 +14,44 @@ import type { DbOrTx } from "@/lib/db/types";
 
 export const USAGE_EVENT_OPTIMISATION = "optimisation";
 export const USAGE_EVENT_QUOTA_REJECTED = "quota_rejected";
+export const USAGE_EVENT_ANALYSIS = "analysis";
+
+export async function countEventsInPeriod(db: DbOrTx, userId: string, eventType: string, period: QuotaPeriod): Promise<number> {
+  const rows = await db
+    .select({ total: sql<number>`coalesce(sum(${usageEvents.units}), 0)` })
+    .from(usageEvents)
+    .where(and(eq(usageEvents.userId, userId), eq(usageEvents.eventType, eventType), gte(usageEvents.createdAt, period.start), lt(usageEvents.createdAt, period.end)));
+  return Number(rows[0]?.total ?? 0);
+}
+
+/** Throws QUOTA_EXCEEDED when the plan's analysis quota is spent. */
+export async function assertAnalysisQuotaAvailable(db: DbOrTx, user: AppUser, now = new Date()): Promise<void> {
+  const plan = planFor(user.planCode);
+  const period = await resolveQuotaPeriod(db, user, now);
+  const used = await countEventsInPeriod(db, user.id, USAGE_EVENT_ANALYSIS, period);
+  if (used >= plan.analysesPerPeriod) {
+    await db.insert(usageEvents).values({ userId: user.id, eventType: USAGE_EVENT_QUOTA_REJECTED, units: 0 });
+    throw new AppError("QUOTA_EXCEEDED", `You have used all ${plan.analysesPerPeriod} prompt analyses for this period.`, {
+      details: { limit: plan.analysesPerPeriod, used, resets_at: period.end.toISOString(), upgrade_available: user.planCode === "free" },
+    });
+  }
+}
+
+/** Consume one analysis unit; the key makes it idempotent per analysis. */
+export async function recordAnalysisUsage(db: DbOrTx, input: { userId: string; analysisId: string; inputTokens: number; outputTokens: number; costUsd: number }): Promise<void> {
+  await db
+    .insert(usageEvents)
+    .values({
+      userId: input.userId,
+      eventType: USAGE_EVENT_ANALYSIS,
+      units: 1,
+      inputTokens: Math.max(0, input.inputTokens),
+      outputTokens: Math.max(0, input.outputTokens),
+      costUsd: Math.max(0, input.costUsd).toFixed(6),
+      idempotencyKey: `analysis:${input.analysisId}`,
+    })
+    .onConflictDoNothing({ target: usageEvents.idempotencyKey });
+}
 
 export interface QuotaPeriod {
   start: Date;
@@ -230,6 +268,34 @@ export async function finaliseRun(db: DbOrTx, runId: string, input: FinaliseRunI
   return run;
 }
 
+/** Store the token comparison and mode of an optimisation on its run (Prompt Library §7). */
+export async function recordRunComparison(
+  db: DbOrTx,
+  runId: string,
+  input: {
+    mode: OptimisationRun["optimisationMode"];
+    targetModel: string;
+    tokensSaved: number;
+    reductionPercent: number;
+    inputCostBefore: number | null;
+    inputCostAfter: number | null;
+    appliedSuggestionCount: number;
+  },
+): Promise<void> {
+  await db
+    .update(optimisationRuns)
+    .set({
+      optimisationMode: input.mode,
+      targetModel: input.targetModel,
+      tokensSaved: input.tokensSaved,
+      reductionPercent: input.reductionPercent.toFixed(2),
+      estimatedInputCostBefore: input.inputCostBefore === null ? null : input.inputCostBefore.toFixed(10),
+      estimatedInputCostAfter: input.inputCostAfter === null ? null : input.inputCostAfter.toFixed(10),
+      appliedSuggestionCount: input.appliedSuggestionCount,
+    })
+    .where(eq(optimisationRuns.id, runId));
+}
+
 export async function linkRunToVersions(db: DbOrTx, runId: string, link: { promptId: string; sourceVersionId: string; resultVersionId: string }): Promise<void> {
   await db
     .update(optimisationRuns)
@@ -303,6 +369,13 @@ export function serialiseRun(run: OptimisationRun) {
     estimated_cost_usd: run.estimatedCostUsd === null ? null : Number(run.estimatedCostUsd),
     pricing_version: run.pricingVersion,
     attempt_count: run.attemptCount,
+    optimisation_mode: run.optimisationMode,
+    target_model: run.targetModel,
+    tokens_saved: run.tokensSaved,
+    reduction_percent: run.reductionPercent === null ? null : Number(run.reductionPercent),
+    estimated_input_cost_before: run.estimatedInputCostBefore === null ? null : Number(run.estimatedInputCostBefore),
+    estimated_input_cost_after: run.estimatedInputCostAfter === null ? null : Number(run.estimatedInputCostAfter),
+    applied_suggestion_count: run.appliedSuggestionCount,
     latency_ms: run.latencyMs,
     error_code: run.errorCode,
     created_at: run.createdAt.toISOString(),

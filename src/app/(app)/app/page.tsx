@@ -2,110 +2,161 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { ProvenanceBadge } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
 import { getCurrentUser } from "@/lib/auth/session";
-import { CATEGORY_LABELS, type TaskCategory } from "@/lib/categories";
+import { formatMoney } from "@/lib/money";
 import { db } from "@/lib/db/client";
-import { listPrompts } from "@/lib/services/prompts";
-import { countRunsForUser, getUsageSummary } from "@/lib/services/usage";
-import { formatDate, formatNumber, truncate } from "@/lib/utils";
+import { getDashboardSummary } from "@/lib/services/dashboard";
+import { getUsageSummary } from "@/lib/services/usage";
+import { formatDate, formatNumber } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Overview" };
+
+function Stat({ label, value, note, href }: { label: string; value: string; note?: React.ReactNode; href?: string }) {
+  const body = (
+    <>
+      <p className="text-sm text-ink-soft">{label}</p>
+      <p className="mt-1 text-2xl">{value}</p>
+      {note ? <div className="mt-1 text-sm text-ink-soft">{note}</div> : null}
+    </>
+  );
+  return href ? (
+    <Link href={href} className="panel block p-5 no-underline hover:border-line-strong">
+      {body}
+    </Link>
+  ) : (
+    <div className="panel p-5">{body}</div>
+  );
+}
 
 export default async function DashboardPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in");
   if (!user.onboardedAt) redirect("/app/onboarding");
 
-  const [recent, usage, totalRuns] = await Promise.all([
-    listPrompts(db, user.id, { pageSize: 6 }),
-    getUsageSummary(db, user),
-    countRunsForUser(db, user.id),
-  ]);
-  const percent = usage.limit ? Math.min(100, Math.round((usage.used / usage.limit) * 100)) : 0;
+  const [summary, usage] = await Promise.all([getDashboardSummary(db, user.id), getUsageSummary(db, user)]);
+  const saved = summary.tokens_saved;
+  const cost = summary.estimated_cost_savings;
 
   return (
     <div className="space-y-10">
       <section className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1>{user.displayName ? `Hello, ${user.displayName.split(" ")[0]}` : "Overview"}</h1>
-          <p className="mt-2 text-ink-soft">Paste a prompt, review the proposal, export the version you want.</p>
+          <p className="mt-2 text-ink-soft">
+            Your private prompt library. {user.historyEnabled ? "Auto-save is on: prompts you optimise are saved here." : "Auto-save is off: save prompts from the studio when you want to keep them."}
+          </p>
         </div>
         <LinkButton href="/app/studio" variant="primary">
           Open the studio
         </LinkButton>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <div className="panel p-5">
-          <p className="text-sm text-ink-soft">Optimisations this period</p>
-          <p className="mt-1 text-2xl">
-            {formatNumber(usage.used)} <span className="text-base text-ink-faint">of {formatNumber(usage.limit)}</span>
-          </p>
-          <div className="meter mt-3" role="meter" aria-valuemin={0} aria-valuemax={usage.limit} aria-valuenow={usage.used} aria-label="Optimisations used">
-            <span style={{ width: `${percent}%` }} />
+      {summary.total_prompts === 0 ? (
+        <div className="panel-soft p-8 text-center">
+          <p className="text-ink-soft">Your library is empty. Optimise a prompt in the studio, or save one, and it will appear here with suggestions and token figures.</p>
+          <div className="mt-4">
+            <LinkButton href="/app/studio" variant="primary">
+              Optimise a prompt
+            </LinkButton>
           </div>
-          <p className="mt-2 text-sm text-ink-soft">Resets {formatDate(usage.period.end)}</p>
+        </div>
+      ) : null}
+
+      <section aria-label="Library summary" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Saved prompts" value={formatNumber(summary.total_prompts)} note={`${formatNumber(summary.favourites)} favourites`} href="/app/library" />
+        <Stat label="Optimised" value={formatNumber(summary.prompts_optimised)} note="prompts with a newer version than the original" href="/app/library?optimisation=optimised" />
+        <Stat label="Need improvement" value={formatNumber(summary.prompts_needing_improvement)} note="high or medium suggestions pending, or a low score" href="/app/library?priority=attention&sort=attention" />
+        <Stat label="Pending suggestions" value={formatNumber(summary.pending_suggestions)} note={`across ${formatNumber(summary.prompts_with_pending_suggestions)} prompts`} href="/app/suggestions" />
+      </section>
+
+      <section aria-labelledby="savings-heading" className="grid gap-4 md:grid-cols-2">
+        <div className="panel p-5">
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="savings-heading" className="text-base">
+              Tokens saved
+            </h2>
+            <Badge tone="estimate">estimate</Badge>
+          </div>
+          <p className="mt-2 text-2xl">
+            {saved.net_tokens_saved >= 0 ? formatNumber(saved.net_tokens_saved) : `${formatNumber(-saved.net_tokens_saved)} more`}
+            <span className="ml-2 text-base text-ink-faint">tokens net</span>
+          </p>
+          <p className="mt-1 text-sm text-ink-soft">
+            {formatNumber(saved.prompts_reduced)} prompts shorter, {formatNumber(saved.prompts_increased)} longer than their originals.
+          </p>
+          <p className="mt-3 text-sm text-ink-faint">{saved.definition}</p>
         </div>
         <div className="panel p-5">
-          <p className="text-sm text-ink-soft">Saved prompts</p>
-          <p className="mt-1 text-2xl">
-            {formatNumber(recent.total)} <span className="text-base text-ink-faint">of {formatNumber(usage.plan.maxSavedPrompts)}</span>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base">Input cost difference</h2>
+            <Badge tone="estimate">estimate</Badge>
+          </div>
+          <p className="mt-2 text-2xl">
+            {formatMoney(Math.abs(cost.estimated_input_cost_saved_per_request))}
+            <span className="ml-2 text-base text-ink-faint">{cost.estimated_input_cost_saved_per_request >= 0 ? "less" : "more"} per run of each prompt</span>
           </p>
-          <p className="mt-2 text-sm text-ink-soft">{user.historyEnabled ? "History is on: optimisations are saved automatically." : "History is off: save prompts yourself."}</p>
-        </div>
-        <div className="panel p-5">
-          <p className="text-sm text-ink-soft">All-time optimisations</p>
-          <p className="mt-1 text-2xl">{formatNumber(totalRuns)}</p>
-          <p className="mt-2 text-sm text-ink-soft">
-            {usage.plan.name} plan. <Link href="/app/usage">See usage and billing</Link>
-          </p>
+          {!cost.complete ? (
+            <p className="mt-1 text-sm text-estimate">Incomplete: no pricing for {cost.unpriced_models.join(", ")}.</p>
+          ) : null}
+          <p className="mt-3 text-sm text-ink-faint">{cost.note}</p>
         </div>
       </section>
 
-      <section>
-        <div className="flex items-baseline justify-between">
-          <h2>Recent prompts</h2>
-          <Link href="/app/library" className="text-sm">
-            Open library
-          </Link>
-        </div>
-        {recent.items.length === 0 ? (
-          <div className="panel-soft mt-4 p-8 text-center">
-            <p className="text-ink-soft">Nothing saved yet. Your first optimisation will appear here.</p>
-            <div className="mt-4">
-              <LinkButton href="/app/studio" variant="primary">
-                Optimise a prompt
-              </LinkButton>
-            </div>
+      <section className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-lg">Recently used</h2>
+            <Link href="/app/library?sort=most_used" className="text-sm">
+              Most used
+            </Link>
           </div>
-        ) : (
-          <ul className="mt-4 grid gap-3 md:grid-cols-2">
-            {recent.items.map((item) => (
-              <li key={item.id} className="panel p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <Link href={`/app/library/${item.id}`} className="font-medium no-underline hover:underline">
-                    {item.title}
+          {summary.recently_used.length === 0 ? (
+            <p className="mt-3 text-sm text-ink-soft">Nothing yet.</p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {summary.recently_used.map((p) => (
+                <li key={p.id} className="panel flex items-center justify-between gap-3 p-3">
+                  <Link href={`/app/library/${p.id}`} className="min-w-0 truncate no-underline hover:underline">
+                    {p.title}
                   </Link>
-                  <span className="badge">{CATEGORY_LABELS[item.category as TaskCategory] ?? item.category}</span>
-                </div>
-                {item.latestVersion ? (
-                  <p className="prompt-text mt-2 text-ink-soft" style={{ whiteSpace: "normal" }}>
-                    {truncate(item.latestVersion.promptText, 160)}
-                  </p>
-                ) : null}
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-                  {item.latestVersion ? <ProvenanceBadge provenance={item.latestVersion.provenance} /> : null}
-                  <span>
-                    {item.versionCount} {item.versionCount === 1 ? "version" : "versions"}, updated {formatDate(item.updatedAt)}
+                  <span className="shrink-0 text-sm text-ink-soft">{p.last_used_at ? `used ${formatDate(p.last_used_at)}` : `edited ${formatDate(p.updated_at)}`}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-lg">Waiting for your review</h2>
+            <Link href="/app/suggestions" className="text-sm">
+              All suggestions
+            </Link>
+          </div>
+          {summary.prompts_with_pending.length === 0 ? (
+            <p className="mt-3 text-sm text-ink-soft">No pending suggestions. Open a prompt and choose Analyse to get some.</p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {summary.prompts_with_pending.map((p) => (
+                <li key={p.id} className="panel flex items-center justify-between gap-3 p-3">
+                  <Link href={`/app/library/${p.id}#suggestions`} className="min-w-0 truncate no-underline hover:underline">
+                    {p.title}
+                  </Link>
+                  <span className="flex shrink-0 items-center gap-2 text-sm">
+                    <Badge tone={p.pending_priority === "high" ? "danger" : "neutral"}>{p.pending_priority} priority</Badge>
+                    {formatNumber(p.pending_suggestion_count)}
                   </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </section>
+
+      <p className="text-sm text-ink-soft">
+        {formatNumber(usage.used)} of {formatNumber(usage.limit)} optimisations used this period. <Link href="/app/usage">Usage and plan</Link>
+      </p>
     </div>
   );
 }

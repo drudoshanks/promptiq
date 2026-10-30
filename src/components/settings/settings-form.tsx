@@ -92,8 +92,8 @@ export function SettingsForm({ initial }: SettingsFormProps) {
         <Switch
           checked={history}
           onChange={setHistory}
-          label="Keep a history of my prompts"
-          description="When on, each optimisation (original and proposal) is saved to your library. When off, nothing is stored unless you save it yourself. Existing saved prompts are not affected."
+          label="Auto-save prompts I optimise"
+          description="When on, each prompt you optimise in the studio is saved to My prompts (the original and the proposal, as versions). Intermediate typing is never saved. When off, nothing is stored unless you choose Save. Existing saved prompts are not affected."
         />
         <Switch
           checked={personalisation}
@@ -102,7 +102,7 @@ export function SettingsForm({ initial }: SettingsFormProps) {
           description="When off, rewrites ignore your preference memory. The preferences themselves stay where they are until you delete them."
         />
         <p className="text-sm text-ink-soft">
-          Prompts you optimise are sent to OpenAI&apos;s API from our servers to be rewritten. We do not use your prompts for analytics, and we do not train models on them.
+          Prompts you optimise or analyse are sent to OpenAI&apos;s API from our servers. Saved prompts are used only to provide features to you. We do not use them for analytics, and we never train models on them; that would require a separate, explicit opt-in, which PromptIQ does not ask for.
         </p>
         {error ? <Alert tone="error">{error}</Alert> : null}
         {saved ? <Alert tone="success">Settings saved.</Alert> : null}

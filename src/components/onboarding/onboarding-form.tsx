@@ -119,7 +119,7 @@ export function OnboardingForm({ initial }: OnboardingFormProps) {
           <Switch
             checked={history}
             onChange={setHistory}
-            label="Keep a history of my prompts"
+            label="Auto-save prompts I optimise"
             description="Saves each optimisation (original and proposal) to your library so you can compare and restore versions. Off means nothing is stored unless you save it."
           />
           <Switch

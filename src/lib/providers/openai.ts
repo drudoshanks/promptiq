@@ -3,15 +3,19 @@ import { zodTextFormat } from "openai/helpers/zod";
 
 import { findSupportedModel } from "@/lib/config/models";
 import { logger } from "@/lib/logger";
+import { ANALYSIS_TEMPLATE_VERSION, buildAnalysisInstructions, buildAnalysisPayload } from "@/lib/analysis/instructions";
+import { analysisOutputSchema, validateAnalysisOutput } from "@/lib/analysis/schema";
 import { buildStableInstructions, buildUserPayload, TEMPLATE_VERSION } from "@/lib/optimiser/instructions";
 import { optimisationOutputSchema, validateOptimisationOutput } from "@/lib/optimiser/schema";
 
 import { CircuitBreaker } from "./circuit-breaker";
 import {
   ProviderError,
+  type AiProvider,
+  type AnalyseRequest,
+  type AnalyseResult,
   type OptimiseRequest,
   type OptimiseResult,
-  type OptimiserProvider,
   type ProviderAttempt,
 } from "./types";
 import { parseResponsesUsage } from "./usage";
@@ -44,12 +48,14 @@ const MAX_RETRY_AFTER_SECONDS = 5;
  * Retries are done here rather than inside the SDK (`maxRetries: 0`) so every
  * request the provider saw is reported as its own attempt with its own usage.
  */
-export class OpenAIOptimiserProvider implements OptimiserProvider {
+export class OpenAIOptimiserProvider implements AiProvider {
   readonly name = "openai" as const;
   readonly modelId: string;
   private readonly client: Pick<OpenAI, "responses">;
   private readonly instructions = buildStableInstructions();
   private readonly format = zodTextFormat(optimisationOutputSchema, "prompt_optimisation");
+  private readonly analysisInstructions = buildAnalysisInstructions();
+  private readonly analysisFormat = zodTextFormat(analysisOutputSchema, "prompt_analysis");
   private readonly breaker: CircuitBreaker;
   private readonly reasoningEffort: ReasoningEffort | undefined;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -62,8 +68,57 @@ export class OpenAIOptimiserProvider implements OptimiserProvider {
     this.sleep = options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   }
 
-  async optimise(request: OptimiseRequest): Promise<OptimiseResult> {
-    const log = logger.withRequest(request.requestId);
+  optimise(request: OptimiseRequest): Promise<OptimiseResult> {
+    return this.callStructured({
+      requestId: request.requestId,
+      userKey: request.userKey,
+      instructions: this.instructions,
+      input: buildUserPayload({
+        prompt: request.prompt,
+        taskCategory: request.taskCategory,
+        preferences: request.preferences,
+        mode: request.mode,
+        customObjective: request.customObjective,
+        acceptedSuggestions: request.acceptedSuggestions,
+      }),
+      format: this.format,
+      cacheKey: TEMPLATE_VERSION,
+      maxOutputTokens: request.maxOutputTokens,
+      validate: validateOptimisationOutput,
+    });
+  }
+
+  analyse(request: AnalyseRequest): Promise<AnalyseResult> {
+    return this.callStructured({
+      requestId: request.requestId,
+      userKey: request.userKey,
+      instructions: this.analysisInstructions,
+      input: buildAnalysisPayload(request),
+      format: this.analysisFormat,
+      cacheKey: ANALYSIS_TEMPLATE_VERSION,
+      maxOutputTokens: 2000,
+      validate: validateAnalysisOutput,
+    });
+  }
+
+  /**
+   * One logical structured-output operation: bounded transport retry, one
+   * repair attempt on malformed output, every attempt reported with its usage.
+   */
+  private async callStructured<T>(call: {
+    requestId: string;
+    userKey: string;
+    instructions: string;
+    input: string;
+    format: ReturnType<typeof zodTextFormat>;
+    cacheKey: string;
+    maxOutputTokens: number;
+    validate: (payload: unknown) => { ok: true; value: T } | { ok: false; reason: string };
+  }): Promise<
+    | { kind: "ok"; output: T; modelId: string; attempts: ProviderAttempt[]; providerRequestId?: string }
+    | { kind: "refused" | "incomplete" | "invalid_output"; reason: string; modelId: string; attempts: ProviderAttempt[]; providerRequestId?: string }
+  > {
+    const log = logger.withRequest(call.requestId);
     const attempts: ProviderAttempt[] = [];
     let transportRetries = 0;
     let repairs = 0;
@@ -81,14 +136,14 @@ export class OpenAIOptimiserProvider implements OptimiserProvider {
         const raw = await this.client.responses
           .create({
             model: this.modelId,
-            instructions: this.instructions,
-            input: buildUserPayload({ prompt: request.prompt, taskCategory: request.taskCategory, preferences: request.preferences }),
-            text: { format: this.format },
-            max_output_tokens: request.maxOutputTokens,
+            instructions: call.instructions,
+            input: call.input,
+            text: { format: call.format },
+            max_output_tokens: call.maxOutputTokens,
             store: false,
             stream: false,
-            prompt_cache_key: TEMPLATE_VERSION,
-            safety_identifier: request.userKey,
+            prompt_cache_key: call.cacheKey,
+            safety_identifier: call.userKey,
             ...(this.reasoningEffort ? { reasoning: { effort: this.reasoningEffort } } : {}),
           })
           .withResponse();
@@ -115,7 +170,7 @@ export class OpenAIOptimiserProvider implements OptimiserProvider {
 
       const usage = parseResponsesUsage(response.usage);
       const base = { attempt: attemptNumber, usage, modelId: response.model || this.modelId, ...(providerRequestId ? { providerRequestId } : {}) };
-      const result = (rest: Omit<ProviderAttempt, "attempt" | "usage" | "modelId" | "providerRequestId">) => {
+      const finish = (rest: Omit<ProviderAttempt, "attempt" | "usage" | "modelId" | "providerRequestId">) => {
         attempts.push({ ...base, ...rest });
         return { modelId: this.modelId, attempts, ...(providerRequestId ? { providerRequestId } : {}) };
       };
@@ -123,13 +178,13 @@ export class OpenAIOptimiserProvider implements OptimiserProvider {
       for (const item of response.output) {
         if (item.type !== "message") continue;
         for (const part of item.content) {
-          if (part.type === "refusal") return { ...result({ status: "refused" }), kind: "refused", reason: part.refusal };
+          if (part.type === "refusal") return { ...finish({ status: "refused" }), kind: "refused", reason: part.refusal };
         }
       }
 
       if (response.status === "incomplete") {
         const reason = response.incomplete_details?.reason ?? "incomplete";
-        return { ...result({ status: "incomplete", errorCode: reason }), kind: "incomplete", reason };
+        return { ...finish({ status: "incomplete", errorCode: reason }), kind: "incomplete", reason };
       }
 
       let parsed: unknown;
@@ -140,20 +195,20 @@ export class OpenAIOptimiserProvider implements OptimiserProvider {
         invalidReason = "response was not valid JSON";
       }
       if (invalidReason === null) {
-        const validation = validateOptimisationOutput(parsed);
-        if (validation.ok) return { ...result({ status: "ok" }), kind: "ok", output: validation.value };
+        const validation = call.validate(parsed);
+        if (validation.ok) return { ...finish({ status: "ok" }), kind: "ok", output: validation.value };
         invalidReason = validation.reason;
       }
 
       // Malformed output: record the attempt (it was billed) and try one repair.
       lastInvalidReason = invalidReason;
-      log.warn("optimiser output invalid", { attempt: attemptNumber, model_id: this.modelId });
+      log.warn("structured output invalid", { attempt: attemptNumber, model_id: this.modelId, template: call.cacheKey });
       if (repairs < MAX_REPAIR_ATTEMPTS) {
         attempts.push({ ...base, status: "invalid_output", errorCode: "INVALID_MODEL_OUTPUT" });
         repairs += 1;
         continue;
       }
-      return { ...result({ status: "invalid_output", errorCode: "INVALID_MODEL_OUTPUT" }), kind: "invalid_output", reason: lastInvalidReason };
+      return { ...finish({ status: "invalid_output", errorCode: "INVALID_MODEL_OUTPUT" }), kind: "invalid_output", reason: lastInvalidReason };
     }
   }
 

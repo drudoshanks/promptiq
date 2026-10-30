@@ -1,5 +1,7 @@
 import type { TaskCategory } from "@/lib/categories";
 import type { UsageRecordStatus } from "@/lib/db/schema";
+import type { AnalysisOutput } from "@/lib/analysis/schema";
+import type { OptimiserMode } from "@/lib/optimiser/instructions";
 import type { OptimisationOutput } from "@/lib/optimiser/schema";
 
 /**
@@ -15,6 +17,20 @@ export interface OptimiseRequest {
   /** Correlation ID for logs (never the prompt). */
   requestId: string;
   /** Opaque, hashed per-user identifier for provider abuse tooling. */
+  userKey: string;
+  mode?: OptimiserMode;
+  customObjective?: string | null;
+  /** Recommendations the user explicitly accepted, applied by the optimiser. */
+  acceptedSuggestions?: string[];
+}
+
+/** One prompt to review; never the user's whole library (§5, §12). */
+export interface AnalyseRequest {
+  prompt: string;
+  targetModel: string | null;
+  preferences: Record<string, string | string[] | null>;
+  feedbackHistory: Record<string, { accepted: number; dismissed: number }>;
+  requestId: string;
   userKey: string;
 }
 
@@ -55,11 +71,25 @@ export type OptimiseResult =
   | (ResultBase & { kind: "incomplete"; reason: string })
   | (ResultBase & { kind: "invalid_output"; reason: string });
 
+export type AnalyseResult =
+  | (ResultBase & { kind: "ok"; output: AnalysisOutput })
+  | (ResultBase & { kind: "refused"; reason: string })
+  | (ResultBase & { kind: "incomplete"; reason: string })
+  | (ResultBase & { kind: "invalid_output"; reason: string });
+
 export interface OptimiserProvider {
   readonly name: "openai" | "mock";
   readonly modelId: string;
   optimise(request: OptimiseRequest): Promise<OptimiseResult>;
 }
+
+export interface PromptAnalyser {
+  readonly name: "openai" | "mock";
+  readonly modelId: string;
+  analyse(request: AnalyseRequest): Promise<AnalyseResult>;
+}
+
+export type AiProvider = OptimiserProvider & PromptAnalyser;
 
 export type ProviderErrorCode = "PROVIDER_TIMEOUT" | "PROVIDER_UNAVAILABLE";
 

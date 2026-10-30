@@ -1,18 +1,31 @@
-import { created, parseJson, withApi } from "@/lib/api/handler";
+import { created, ok, parseJson, withApi } from "@/lib/api/handler";
 import { createVersionSchema, idParamSchema } from "@/lib/api/validation";
-import { planFor } from "@/lib/config/plans";
 import { db } from "@/lib/db/client";
-import { addVersion, serialiseVersion } from "@/lib/services/prompts";
+import { saveLibraryVersion } from "@/lib/services/library";
+import { getPrompt, serialiseVersion } from "@/lib/services/prompts";
 
-/** POST /api/v1/prompts/{id}/versions — append an immutable version (FR-018). */
+/** GET /api/v1/prompts/{id}/versions — immutable version history, oldest first. */
+export const GET = withApi<"required", { id: string }>({ auth: "required" }, async ({ user, params }) => {
+  const { id } = idParamSchema.parse(params);
+  const prompt = await getPrompt(db, user.id, id);
+  return ok({ items: prompt.versions.map(serialiseVersion), current_version_id: prompt.currentVersionId });
+});
+
+/**
+ * POST /api/v1/prompts/{id}/versions — save a new immutable version (FR-018).
+ * With `optimisation_id` the version is linked to the library optimisation that
+ * produced it; `suggestion_ids` are marked applied. Nothing is ever overwritten.
+ */
 export const POST = withApi<"required", { id: string }>({ auth: "required", rateLimit: "userPerMinute" }, async ({ request, user, params }) => {
   const { id } = idParamSchema.parse(params);
   const body = await parseJson(request, createVersionSchema);
-  const version = await addVersion(db, user.id, planFor(user.planCode), id, {
+  const version = await saveLibraryVersion(db, user, id, {
     promptText: body.prompt_text,
     provenance: body.provenance,
-    changeSummary: body.change_summary,
     parentVersionId: body.parent_version_id,
+    changeSummary: body.change_summary,
+    optimisationId: body.optimisation_id,
+    suggestionIds: body.suggestion_ids,
   });
   return created(serialiseVersion(version));
 });

@@ -18,7 +18,7 @@ import {
   type TokenComparisonResult,
 } from "@/lib/services/estimates";
 import { listEnabledPreferences } from "@/lib/services/preferences";
-import { createPrompt } from "@/lib/services/prompts";
+import { createPrompt, refreshPromptStats } from "@/lib/services/prompts";
 import {
   assertQuotaAvailable,
   finaliseRun,
@@ -26,11 +26,12 @@ import {
   idempotencyKeyUsed,
   linkRunToVersions,
   recordRun,
+  recordRunComparison,
   recordUsage,
 } from "@/lib/services/usage";
 import type { ApiUsageRecord, RunStatus } from "@/lib/db/schema";
 
-import { TEMPLATE_VERSION } from "./instructions";
+import { TEMPLATE_VERSION, type OptimiserMode } from "./instructions";
 import { normalisePrompt } from "./normalise";
 import { resolvePreferences, type EffectivePreferences, type PreferenceResolution } from "./preferences";
 
@@ -46,6 +47,16 @@ export interface OptimiseServiceInput {
     /** Model the user will run the prompt on; drives the token/cost estimate only. */
     targetModel?: string;
     expectedOutput?: OutputLengthPreset | number;
+    mode?: OptimiserMode;
+    customObjective?: string | null;
+    /** Recommendations of suggestions the user accepted, to apply. */
+    acceptedSuggestions?: string[];
+    /**
+     * Optimising a saved library prompt: the run is linked to the prompt and
+     * source version, and NO version is created — the user reviews the proposal
+     * and saves it explicitly (Prompt Library §6: never overwrite automatically).
+     */
+    library?: { promptId: string; sourceVersionId: string };
   };
 }
 
@@ -79,6 +90,8 @@ export interface OptimisationResponse {
   saved_prompt_id: string | null;
   saved_version_ids: { original: string; optimised: string } | null;
   preferences_applied: PreferenceResolution;
+  optimisation_mode: OptimiserMode;
+  applied_suggestion_count: number;
 }
 
 export interface OptimiseServiceContext {
@@ -197,6 +210,9 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
 
   // The logical operation exists before the provider is called, so every
   // attempt (including ones that fail) can be attributed to it.
+  const library = input.options?.library ?? null;
+  const mode: OptimiserMode = input.options?.mode ?? "balanced";
+  const acceptedSuggestions = (input.options?.acceptedSuggestions ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 12);
   const run = await recordRun(db, {
     userId: user.id,
     provider: provider.name,
@@ -207,6 +223,8 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
     inputChars: prompt.length,
     latencyMs: 0,
     requestId: ctx.requestId,
+    promptId: library?.promptId ?? null,
+    sourceVersionId: library?.sourceVersionId ?? null,
   });
 
   const close = async (status: RunStatus, attempts: ProviderAttempt[], extra: { modelId?: string; errorCode?: string | null; taskCategory?: string | null; outputChars?: number | null; requestId?: string | null } = {}) => {
@@ -239,12 +257,16 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
       maxOutputTokens,
       requestId: ctx.requestId,
       userKey: userKeyFor(user.id),
+      mode,
+      customObjective: mode === "custom" ? (input.options?.customObjective ?? null) : null,
+      acceptedSuggestions,
     });
   } catch (error) {
     const code = error instanceof ProviderError ? error.code : "PROVIDER_UNAVAILABLE";
     const reason = error instanceof ProviderError ? error.reason : "unknown";
     const attempts = error instanceof ProviderError ? error.attempts : [];
     await close("failed", attempts, { errorCode: `${code}:${reason}` });
+    if (library) await refreshPromptStats(db, library.promptId);
     log.warn("optimisation failed", { code, reason, attempts: attempts.length, latency_ms: Date.now() - startedAt, model_id: provider.modelId });
     const retryAfter = error instanceof ProviderError ? error.retryAfterSeconds : undefined;
     throw new AppError(
@@ -297,15 +319,26 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
     expectedOutput: input.options?.expectedOutput,
   });
 
-  // 8. History (only when enabled; FR-009, A-07).
-  let savedPromptId: string | null = null;
+  await recordRunComparison(db, run.id, {
+    mode,
+    targetModel: estimate.model,
+    tokensSaved: estimate.tokens_saved,
+    reductionPercent: estimate.reduction_percent,
+    inputCostBefore: estimate.cost?.input_cost_before ?? null,
+    inputCostAfter: estimate.cost?.input_cost_after ?? null,
+    appliedSuggestionCount: acceptedSuggestions.length,
+  });
+
+  // 8. History (auto-save; only when enabled and not a library optimisation; FR-009, A-07).
+  let savedPromptId: string | null = library?.promptId ?? null;
   let savedVersionIds: OptimisationResponse["saved_version_ids"] = null;
   const wantsSave = input.options?.saveToHistory ?? true;
-  if (user.historyEnabled && wantsSave) {
+  if (!library && user.historyEnabled && wantsSave) {
     try {
       const savedPrompt = await createPrompt(db, user.id, plan, {
         title: input.options?.title,
         category: taskCategory,
+        targetModel: estimate.model,
         versions: [
           { promptText: prompt, provenance: "original" },
           { promptText: output.optimised_prompt, provenance: "ai_optimised", changeSummary: output.change_summary },
@@ -316,6 +349,7 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
         savedPromptId = savedPrompt.id;
         savedVersionIds = { original: original.id, optimised: optimised.id };
         await linkRunToVersions(db, run.id, { promptId: savedPrompt.id, sourceVersionId: original.id, resultVersionId: optimised.id });
+        await refreshPromptStats(db, savedPrompt.id);
       }
     } catch (error) {
       // A full library must not lose the optimisation result: return it unsaved.
@@ -347,7 +381,8 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
     pricing_warning: estimate.pricing_warning,
     limitations: estimate.limitations,
   });
-  await recordTokenEstimate(db, { userId: user.id, label: "original", runId: run.id, promptVersionId: savedVersionIds?.original ?? null, estimate: asEstimate("original") });
+  if (library) await refreshPromptStats(db, library.promptId);
+  await recordTokenEstimate(db, { userId: user.id, label: "original", runId: run.id, promptVersionId: savedVersionIds?.original ?? library?.sourceVersionId ?? null, estimate: asEstimate("original") });
   await recordTokenEstimate(db, { userId: user.id, label: "optimised", runId: run.id, promptVersionId: savedVersionIds?.optimised ?? null, estimate: asEstimate("optimised") });
 
   // 9. Consume quota exactly once per logical operation, with the summed usage.
@@ -402,6 +437,8 @@ export async function optimisePromptForUser(ctx: OptimiseServiceContext, input: 
     saved_prompt_id: savedPromptId,
     saved_version_ids: savedVersionIds,
     preferences_applied: { effective, sources: resolution.sources },
+    optimisation_mode: mode,
+    applied_suggestion_count: acceptedSuggestions.length,
   };
 
   if (ctx.idempotencyKey) {

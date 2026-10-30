@@ -73,6 +73,15 @@ full design, limitations and pricing operations are in
 [`docs/token-cost-estimation.md`](docs/token-cost-estimation.md). Add a verified
 rate with `npm run pricing:add`.
 
+## Personal prompt library
+
+Auto-saved or manually saved prompts with immutable versions, AI analysis with
+per-version suggestions you accept, dismiss or defer, four optimisation modes
+that produce reviewable proposals (never overwriting the original), dashboards
+for suggestions, history and token/cost analytics, and explicit prompt
+preferences. Design, metrics definitions and privacy rules:
+[`docs/prompt-library.md`](docs/prompt-library.md).
+
 ## Decisions and deviations from the SRS baseline
 
 - **Auth vendor.** The SRS leaves the vendor open (A-04). Better Auth was chosen
