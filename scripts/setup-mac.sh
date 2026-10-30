@@ -45,18 +45,6 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 ok "Homebrew $(brew --version | head -1 | awk '{print $2}')"
 
-# --- Node 22 -----------------------------------------------------------------
-say "Checking Node.js (22 or newer)"
-node_major() { node -v 2>/dev/null | sed 's/^v//; s/\..*//'; }
-if [[ -z "$(node_major)" || "$(node_major)" -lt 22 ]]; then
-  brew list node@22 >/dev/null 2>&1 || brew install node@22
-  NODE_PREFIX="$(brew --prefix node@22)"
-  export PATH="$NODE_PREFIX/bin:$PATH"
-  NODE_NOTE="Node 22 was installed with Homebrew but is not your default. To use it in new windows, run:  echo 'export PATH=\"$(brew --prefix node@22)/bin:\$PATH\"' >> ~/.zshrc"
-fi
-[[ "$(node_major)" -ge 22 ]] || fail "Node 22+ is still not available (found $(node -v 2>/dev/null || echo none))."
-ok "Node $(node -v)"
-
 # --- 2. PostgreSQL 16 --------------------------------------------------------
 say "Checking PostgreSQL 16"
 brew list postgresql@16 >/dev/null 2>&1 || brew install postgresql@16
@@ -85,6 +73,27 @@ else
   psql "$DB_URL" -Atc "select 1" >/dev/null || fail "created the database but cannot log in as promptiq."
   ok "database promptiq ready"
 fi
+
+# --- Node 22 (checked after PostgreSQL: installing Postgres can upgrade shared
+# Homebrew libraries such as icu4c, which breaks an older Homebrew node) -------
+say "Checking Node.js (22 or newer)"
+node_major() { node -v 2>/dev/null | sed 's/^v//; s/\..*//'; }
+if [[ -z "$(node_major)" ]] && brew list node >/dev/null 2>&1; then
+  echo "    Homebrew's node is installed but will not start (usually a library it"
+  echo "    needs was upgraded). Upgrading it with Homebrew to repair it."
+  brew upgrade node || brew reinstall node
+  hash -r
+fi
+if [[ -z "$(node_major)" || "$(node_major)" -lt 22 ]]; then
+  brew list node@22 >/dev/null 2>&1 || brew install node@22
+  NODE_PREFIX="$(brew --prefix node@22)"
+  export PATH="$NODE_PREFIX/bin:$PATH"
+  hash -r
+  NODE_NOTE="Node 22 was installed with Homebrew but is not your default. To use it in new windows, run:  echo 'export PATH=\"$NODE_PREFIX/bin:\$PATH\"' >> ~/.zshrc"
+fi
+[[ "$(node_major)" -ge 22 ]] || fail "Node 22+ is still not available (found $(node -v 2>&1 | head -1 || echo none))."
+npm -v >/dev/null 2>&1 || fail "node works but npm does not. Try: brew reinstall node"
+ok "Node $(node -v), npm $(npm -v)"
 
 # --- 3. Code -----------------------------------------------------------------
 say "Getting the code into $DIR"
