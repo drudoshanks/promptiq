@@ -22,6 +22,16 @@ final prompt is never executed.
 
 ## Run it locally
 
+**macOS, one command** (installs Node 22 and PostgreSQL 16 with Homebrew, no
+Docker needed; safe to re-run):
+
+```bash
+bash scripts/setup-mac.sh       # or run the downloaded script before cloning
+cd ~/promptiq && npm run dev    # http://localhost:3000
+```
+
+**Any OS, by hand** (uses Docker for PostgreSQL):
+
 ```bash
 cp .env.example .env.local        # defaults: mock optimiser, local Postgres
 docker compose up -d db           # PostgreSQL 16 on localhost:5432
