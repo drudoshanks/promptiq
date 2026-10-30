@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PromptIQ: one-command local setup for macOS (Apple Silicon or Intel).
 #
-#   bash setup-mac.sh                 # installs into ~/promptiq
+#   bash setup-mac.sh                 # installs into ~/Desktop/promptiq
 #   PROMPTIQ_DIR=~/code/promptiq bash setup-mac.sh
 #
 # What it does (safe to re-run; every step skips work already done):
@@ -16,7 +16,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/drudoshanks/promptiq.git"
 BRANCH="${PROMPTIQ_BRANCH:-feature/prompt-library}"
-DIR="${PROMPTIQ_DIR:-$HOME/promptiq}"
+DIR="${PROMPTIQ_DIR:-$HOME/Desktop/promptiq}"
 DB_URL="postgresql://promptiq:promptiq@localhost:5432/promptiq"
 
 say()  { printf "\n\033[1;34m==>\033[0m %s\n" "$*"; }
