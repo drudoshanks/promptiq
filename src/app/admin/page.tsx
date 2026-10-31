@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import { AppNav } from "@/components/app-nav";
 import { Badge } from "@/components/ui/badge";
 import { getCurrentUser } from "@/lib/auth/session";
 import { formatUsd } from "@/lib/cost";
@@ -29,9 +28,7 @@ export default async function AdminPage() {
   ];
 
   return (
-    <div className="min-h-dvh">
-      <AppNav email={user.email} isAdmin />
-      <main className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6">
+    <div className="space-y-8">
         <div>
           <h1>Operations</h1>
           <p className="mt-2 text-ink-soft">
@@ -106,7 +103,6 @@ export default async function AdminPage() {
         </div>
 
         <p className="text-sm text-ink-faint">Operator views are audited. Prompt content is never shown here; break-glass access to a user&apos;s data requires a documented incident ticket.</p>
-      </main>
     </div>
   );
 }

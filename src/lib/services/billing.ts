@@ -25,6 +25,10 @@ export function getStripe(): Stripe {
 }
 
 export async function createCheckoutSession(db: DbOrTx, user: AppUser): Promise<{ url: string }> {
+  const current = await db.query.subscriptions.findFirst({ where: eq(subscriptions.userId, user.id) });
+  if (current?.billingProvider === "upi" && current.status === "active" && current.currentPeriodEnd && current.currentPeriodEnd > new Date()) {
+    throw new AppError("CONFLICT", "You already have Pro until the end of your UPI-paid period. Renew with UPI, or switch to a card subscription after it ends.");
+  }
   const stripe = getStripe();
   if (user.planCode === "pro") {
     throw new AppError("CONFLICT", "You already have an active Pro subscription.");

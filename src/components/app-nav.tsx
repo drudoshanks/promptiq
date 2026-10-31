@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  BadgeIndianRupee,
   BarChart3,
+  CreditCard,
   Gauge,
   History,
   Home,
@@ -53,6 +55,7 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "You",
     items: [
+      { href: "/app/billing", label: "Billing and payments", icon: CreditCard },
       { href: "/app/preferences", label: "Preferences", icon: SlidersHorizontal },
       { href: "/app/settings", label: "Settings", icon: Settings },
     ],
@@ -66,7 +69,9 @@ interface AppNavProps {
 
 function NavLinks({ isAdmin, onNavigate }: { isAdmin: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
-  const groups = isAdmin ? [...GROUPS, { label: "Operator", items: [{ href: "/admin", label: "Operations", icon: ShieldCheck }] }] : GROUPS;
+  const groups = isAdmin
+    ? [...GROUPS, { label: "Operator", items: [{ href: "/admin", label: "Operations", icon: ShieldCheck, exact: true }, { href: "/admin/payments", label: "Payments", icon: BadgeIndianRupee }] }]
+    : GROUPS;
   return (
     <nav aria-label="Application" className="space-y-5">
       {groups.map((group) => (

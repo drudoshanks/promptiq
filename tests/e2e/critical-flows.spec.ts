@@ -170,3 +170,46 @@ test("prompt intelligence: detailed and token-saver versions with requirement ch
   await page.goto("/app");
   await expect(page.getByText("Tokens saved").first()).toBeVisible();
 });
+
+test("UPI: pay by QR, submit the UTR, an administrator verifies, and Pro activates", async ({ page, browser }) => {
+  const adminEmail = process.env.E2E_ADMIN_EMAIL;
+  const adminPassword = process.env.E2E_ADMIN_PASSWORD;
+  test.skip(!adminEmail || !adminPassword, "Set E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD (an account listed in ADMIN_EMAILS) to run this flow.");
+  const utr = `${Date.now()}`.slice(-9) + String(Math.floor(Math.random() * 900) + 100);
+
+  await signIn(page);
+  await page.goto("/app/billing");
+  await expect(page.getByText("activation is not instant")).toBeVisible();
+  await page.getByRole("button", { name: "Choose plan" }).first().click();
+  await expect(page).toHaveURL(/\/app\/billing\/pay\//);
+  await expect(page.getByRole("img", { name: /UPI QR code to pay ₹499.00/ })).toBeVisible();
+  const reference = (await page.getByText(/^PIQ-\d{4}-[0-9A-Z]{5}$/).first().textContent())!.trim();
+
+  await page.getByRole("button", { name: "I have paid" }).click();
+  await page.getByLabel(/UPI transaction ID/).fill(utr);
+  await page.getByRole("button", { name: "Submit payment details" }).click();
+  await expect(page.getByText("Payment details submitted. Your subscription will be activated after verification.")).toBeVisible();
+  await page.goto("/app/billing");
+  await expect(page.getByText("Free", { exact: true }).first()).toBeVisible();
+
+  const adminContext = await browser.newContext();
+  const admin = await adminContext.newPage();
+  await admin.goto("/sign-in");
+  await admin.getByLabel("Email").fill(adminEmail!);
+  await admin.getByLabel("Password").fill(adminPassword!);
+  await admin.getByRole("button", { name: "Sign in" }).click();
+  await admin.waitForURL(/\/app/);
+  await admin.goto(`/admin/payments?status=&customer=${encodeURIComponent(reference)}`);
+  await admin.getByRole("link", { name: reference }).click();
+  await admin.getByRole("button", { name: "Verify payment" }).click();
+  await admin.getByRole("checkbox", { name: /independently checked/ }).check();
+  await admin.getByLabel(/Amount received/).fill("499.00");
+  await admin.getByLabel("Verification evidence").fill(`Test bank statement: credit ₹499, UTR ${utr}`);
+  await admin.getByRole("button", { name: "Verify and activate" }).click();
+  await expect(admin.getByText("Verified", { exact: true }).first()).toBeVisible();
+  await adminContext.close();
+
+  await page.goto("/app/billing");
+  await expect(page.getByText("Pro", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("View receipt")).toBeVisible();
+});

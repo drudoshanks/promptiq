@@ -158,6 +158,9 @@ export default function LandingPage() {
               </div>
             ))}
           </div>
+          <p className="mt-4 text-sm text-ink-soft">
+            Paying from India? Pro is available with UPI in rupees: <Link href="/app/billing">see UPI plans</Link>. Payments are checked by hand before activation.
+          </p>
         </section>
       </main>
 

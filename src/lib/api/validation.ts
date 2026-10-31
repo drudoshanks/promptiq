@@ -3,7 +3,7 @@ import { z } from "zod";
 import { FEEDBACK_REASON_CODES, PREFERENCE_KEYS, TASK_CATEGORIES } from "@/lib/categories";
 import { MAX_EXPECTED_OUTPUT_TOKENS, MAX_TOKEN_COUNT_CHARS, OUTPUT_LENGTH_PRESETS } from "@/lib/config/estimates";
 import { HARD_MAX_PROMPT_CHARS } from "@/lib/config/plans";
-import { PROVENANCES } from "@/lib/db/schema";
+import { PAYMENT_STATUSES, PROVENANCES } from "@/lib/db/schema";
 import { GENERATION_MODES, INTENT_CATEGORIES, SUGGESTION_KINDS } from "@/lib/intelligence/categories";
 import { EXPORT_FORMATS } from "@/lib/export";
 
@@ -325,3 +325,46 @@ export const historyQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   page_size: z.coerce.number().int().min(1).max(100).default(25),
 });
+
+// ---------------------------------------------------------------------------
+// UPI payments
+// ---------------------------------------------------------------------------
+export const createPaymentRequestSchema = z.object({ plan_code: z.string().regex(/^[a-z0-9_]{2,40}$/) }).strict();
+
+export const submitPaymentSchema = z
+  .object({
+    transaction_reference: z.string().min(1).max(60),
+    paid_at: z.iso.datetime({ offset: true, local: true }),
+    /** Rupees as shown to the user (e.g. "499.00"); converted to paise server-side. */
+    amount: z.union([z.string().max(20), z.number()]),
+    notes: z.string().max(1000).nullable().optional(),
+  })
+  .strict();
+
+export const adminPaymentsQuerySchema = z.object({
+  status: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : undefined))
+    .pipe(z.array(z.enum(PAYMENT_STATUSES)).optional()),
+  plan: z.string().regex(/^[a-z0-9_]{2,40}$/).optional(),
+  customer: z.string().max(200).optional(),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+  page: z.coerce.number().int().min(1).max(10_000).default(1),
+  page_size: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+export const verifyPaymentSchema = z
+  .object({
+    confirmed_independent_check: z.literal(true, { message: "Confirm that you checked the bank statement or UPI merchant app." }),
+    verification_notes: z.string().min(5).max(2000),
+    verified_amount: z.union([z.string().max(20), z.number()]),
+    discrepancy_resolution: z.string().max(1000).nullable().optional(),
+    recovery_reason: z.string().max(1000).nullable().optional(),
+    transaction_reference: z.string().max(60).nullable().optional(),
+  })
+  .strict();
+
+export const rejectPaymentSchema = z.object({ reason: z.string().min(10).max(1000) }).strict();
+export const requestInformationSchema = z.object({ message: z.string().min(10).max(1000) }).strict();
