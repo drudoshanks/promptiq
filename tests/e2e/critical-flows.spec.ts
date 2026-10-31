@@ -61,26 +61,31 @@ test("sign up, onboard, optimise, edit, copy, export, give feedback", async ({ p
   await expect(page).toHaveURL(/\/app\/studio/);
 
   const prompt = "write me an email to a client about the invoice they havent paid its invoice 4471 for $2,300";
-  await page.getByLabel("Your prompt").fill(prompt);
+  await page.getByLabel("Prompt", { exact: true }).fill(prompt);
+  await expect(page.getByTestId("live-tokens")).toHaveText(/\d+ tokens/);
+  await expect(page.getByText(/1 saved preference applied/)).toBeVisible();
   await page.getByRole("button", { name: "Optimise prompt" }).click();
 
-  await expect(page.getByRole("heading", { name: "Proposed rewrite" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Proposed prompt" })).toBeVisible();
   await expect(page.getByText("4471").first()).toBeVisible();
-  await expect(page.getByText("What changed")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Key improvements" })).toBeVisible();
+  // Saved preference from onboarding applied; auto-save (on by default) stored the result.
+  await expect(page.getByText(/tone: professional direct/)).toBeVisible();
+  await expect(page.getByText(/Auto-save is on, so the original and this proposal were saved/)).toBeVisible();
 
   // Token & cost panel: original vs optimised, recounted after an edit.
+  await page.getByText("Cost details: answer length and cost per request").click();
   await expect(page.getByTestId("tokens-original")).toHaveText(/\d+/);
   const before = Number(await page.getByTestId("tokens-optimised").textContent());
-
-  await page.getByRole("button", { name: "Edit proposal" }).click();
-  const editor = page.getByLabel("Your version");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const editor = page.getByLabel("Edit the proposed prompt");
   await editor.fill((await editor.inputValue()) + "\n\nKeep it under 120 words.");
   await expect.poll(async () => Number(await page.getByTestId("tokens-optimised").textContent())).toBeGreaterThan(before);
-  await expect(page.getByText(/cannot see your actual usage/)).toBeVisible();
-  await page.getByRole("button", { name: "Done editing" }).click();
-  await expect(page.getByRole("button", { name: "Reset to proposal" })).toBeVisible();
+  await page.getByRole("button", { name: "Check requirements in my edit" }).click();
+  await expect(page.getByText(/requirement/).first()).toBeVisible();
+  await page.getByRole("button", { name: "Discard edits" }).click();
 
-  await page.getByRole("button", { name: "Copy prompt" }).click();
+  await page.getByRole("button", { name: "Copy" }).click();
   await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
 
   const download = page.waitForEvent("download");
@@ -88,6 +93,7 @@ test("sign up, onboard, optimise, edit, copy, export, give feedback", async ({ p
   await page.getByLabel("Format").selectOption("md");
   await page.getByRole("button", { name: /Download MD/ }).click();
   expect((await download).suggestedFilename()).toMatch(/\.md$/);
+  await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Helpful", exact: true }).click();
   await page.getByLabel("Reason (optional)").selectOption("CLEARER");
@@ -148,7 +154,8 @@ test("library: analyse with the intelligence engine, apply a suggestion and save
 test("prompt intelligence: detailed and token-saver versions with requirement checks, saved to the library", async ({ page }) => {
   await signIn(page);
 
-  await page.goto("/app/intelligence");
+  await page.goto("/app/intelligence"); // old address redirects to the Studio
+  await expect(page).toHaveURL(/\/app\/studio/);
   await page.getByLabel("Prompt", { exact: true }).fill("Please could you build an ecommerce website for my bakery. It must support online orders. It must support online orders. Do not use WordPress.");
   await page.getByRole("button", { name: "Analyse prompt" }).click();
   await expect(page.getByRole("heading", { name: /Software development/ })).toBeVisible();
@@ -165,7 +172,9 @@ test("prompt intelligence: detailed and token-saver versions with requirement ch
   await expect(page.getByText("Tokens saved")).toBeVisible();
   await expect(page.getByText("Requirements kept").first()).toBeVisible();
 
+  // Auto-save was switched off in the settings test, so saving asks for details first.
   await page.getByRole("button", { name: "Accept and save to My prompts" }).click();
+  await page.getByRole("button", { name: "Save prompt" }).click();
   await expect(page).toHaveURL(/\/app\/library\/[0-9a-f-]{36}/);
   await page.goto("/app");
   await expect(page.getByText("Tokens saved").first()).toBeVisible();

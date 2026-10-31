@@ -15,7 +15,6 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
-  SquarePen,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -38,8 +37,7 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
     label: "Work",
     items: [
       { href: "/app", label: "Overview", icon: Home, exact: true },
-      { href: "/app/intelligence", label: "Prompt intelligence", icon: Sparkles },
-      { href: "/app/studio", label: "Quick studio", icon: SquarePen },
+      { href: "/app/studio", label: "Studio", icon: Sparkles },
       { href: "/app/library", label: "My prompts", icon: Library },
       { href: "/app/suggestions", label: "Suggestions", icon: Lightbulb },
     ],

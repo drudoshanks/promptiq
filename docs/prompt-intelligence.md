@@ -5,14 +5,18 @@ user's intent. It analyses the task, scores completeness, explains what is
 missing, generates detailed or token-efficient revisions, checks that every
 requirement survived, and learns from the user's explicit feedback.
 
-Everything is reviewable. No revision is saved until the user accepts it, and
-the original version is never overwritten.
+Everything is reviewable and the original version is never overwritten. The
+only automatic save is auto-save (below), which stores an unsaved prompt and its
+first proposal as separate versions; later drafts and edits are saved only when
+the user chooses to.
 
 ## Workflow
 
-1. The user enters a prompt in **Prompt intelligence** (`/app/intelligence`),
-   or opens one from **My prompts** (the same workspace is embedded on every
-   prompt page).
+1. The user enters a prompt in the **Studio** (`/app/studio`), or opens one
+   from **My prompts** (the same workspace is embedded on every prompt page).
+   The Studio replaced the separate Quick studio and Prompt intelligence pages;
+   `/app/intelligence` redirects to it, keeping `?prompt=`. A live token count,
+   input cost and character limit update as the user types.
 2. **Analyse** classifies the task, scores the prompt against the rubric,
    extracts its requirements, lists missing information, and ranks
    suggestions.
@@ -28,6 +32,25 @@ the original version is never overwritten.
 7. Explicit feedback (accepted, dismissed or deferred suggestions, the chosen
    mode, saved revisions, restored versions, helpful/unhelpful ratings) shapes
    how future suggestions are ranked for that user.
+
+### Saved preferences and auto-save
+
+- **Saved preferences.** When personalisation is on, the user's enabled
+  preferences (tone, detail, format and so on, from **Preferences**) are added
+  to every revision request as `saved_preferences`
+  (`src/lib/intelligence/saved-preferences.ts`). A preference is skipped when
+  the prompt already states the same thing (for example, the prompt asks for a
+  table and the saved format is bullets). The response reports
+  `preferences_applied.effective` and
+  `preferences_applied.skipped_because_prompt_says_otherwise`, which the Studio
+  shows as chips.
+- **Auto-save.** When history is on (`app_users.history_enabled`) and the text
+  is not yet a saved prompt, the first revision creates a prompt with an
+  `original` and an `ai_optimised` version linked to the run, and returns
+  `auto_saved`. Later drafts are sent with that `prompt_id`. Edits to the
+  proposal are saved as a `user_edited` version only when the user saves. If
+  the library is full, nothing is saved and `auto_save_skipped` is
+  `"library_full"`. Clients can opt out per request with `auto_save: false`.
 
 ## Modules
 

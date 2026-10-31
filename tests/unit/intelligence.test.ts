@@ -430,7 +430,7 @@ describe("OpenAI adapter for intelligence calls (retries and repair)", () => {
     const err = () => new APIConnectionError({ message: "down" });
     const c = client([err(), err()]);
     const provider = new OpenAIOptimiserProvider({ apiKey: "k", modelId: "gpt-5-mini", timeoutMs: 1000, client: c as never, sleep: async () => undefined });
-    await expect(provider.revisePrompt({ prompt: "p", mode: "balanced", intent: buildIntent({ text: "Write a poem", classification: classifyByRules("Write a poem"), requirements: extractRequirements("Write a poem") }), template: templateFor("general"), acceptedChanges: [], acceptedKinds: [], customObjective: null, tokenBudget: null, restore: [], preferences: {}, questions: [], requestId: "x", userKey: "u" })).rejects.toBeInstanceOf(ProviderError);
+    await expect(provider.revisePrompt({ prompt: "p", mode: "balanced", intent: buildIntent({ text: "Write a poem", classification: classifyByRules("Write a poem"), requirements: extractRequirements("Write a poem") }), template: templateFor("general"), acceptedChanges: [], acceptedKinds: [], preferenceLines: [], customObjective: null, tokenBudget: null, restore: [], preferences: {}, questions: [], requestId: "x", userKey: "u" })).rejects.toBeInstanceOf(ProviderError);
     expect(c.calls()).toBe(2);
   });
 });

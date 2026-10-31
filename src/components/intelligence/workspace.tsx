@@ -1,16 +1,22 @@
 "use client";
 
-import { Check, Copy, Download, PencilLine, RotateCcw, Sparkles, ThumbsDown, ThumbsUp, Wand2, X } from "lucide-react";
+import { Check, Copy, Download, PencilLine, RotateCcw, Sparkles, Wand2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 
 import { DiffView } from "@/components/diff-view";
+import { LiveTokenCount } from "@/components/estimates/live-token-count";
+import { TokenCostPanel } from "@/components/estimates/token-cost-panel";
+import { FeedbackPanel } from "@/components/studio/feedback-panel";
+import { SaveExportDialog } from "@/components/studio/save-export-dialog";
 import { Alert } from "@/components/ui/alert";
 import { Badge, EstimateBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
-import { api, errorMessage, triggerDownload } from "@/lib/client/api";
+import { api, errorMessage } from "@/lib/client/api";
+import type { ModelOption } from "@/lib/client/estimates";
+import { DEFAULT_OUTPUT_PRESET, type OutputLengthPreset } from "@/lib/config/estimates";
 import { GENERATION_MODE_LABELS, GENERATION_MODES, INTENT_CATEGORIES, INTENT_LABELS, TO_TASK_CATEGORY, type GenerationMode, type IntentCategory } from "@/lib/intelligence/categories";
 import { formatMoney } from "@/lib/money";
 import type { IntelligenceAnalysis, IntelligenceRevision } from "@/lib/services/intelligence";
@@ -39,6 +45,15 @@ interface WorkspaceProps {
   initialAnalysis?: IntelligenceAnalysis | null;
   /** Embedded on a prompt page: no page heading, editor collapsed by default. */
   embedded?: boolean;
+  /** Studio settings: auto-save, saved preferences, plan limits and model pricing. */
+  studio?: {
+    historyEnabled: boolean;
+    personalisationEnabled: boolean;
+    savedPreferenceCount: number;
+    maxPromptChars: number;
+    modelOptions: ModelOption[];
+  };
+  initialText?: string;
 }
 
 const PRIORITY_TONE = { high: "danger", medium: "warn", low: "neutral" } as const;
@@ -52,9 +67,12 @@ function signed(n: number) {
   return n > 0 ? `+${formatNumber(n)}` : formatNumber(n);
 }
 
-export function IntelligenceWorkspace({ models, defaultModel, defaultMode, prompt, initialAnalysis = null, embedded = false }: WorkspaceProps) {
+export function IntelligenceWorkspace({ models, defaultModel, defaultMode, prompt, initialAnalysis = null, embedded = false, studio, initialText = "" }: WorkspaceProps) {
   const router = useRouter();
-  const [text, setText] = useState(prompt?.text ?? "");
+  const [text, setText] = useState(prompt?.text ?? initialText);
+  const [autoSaved, setAutoSaved] = useState<{ promptId: string; originalVersionId: string; proposedVersionId: string; revisionId: string; text: string } | null>(null);
+  const [dialog, setDialog] = useState<null | "save" | "export">(null);
+  const [outputPreset, setOutputPreset] = useState<OutputLengthPreset>(DEFAULT_OUTPUT_PRESET);
   const [category, setCategory] = useState<IntentCategory | "auto">("auto");
   const [model, setModel] = useState(defaultModel);
   const [mode, setMode] = useState<GenerationMode>(defaultMode);
@@ -79,7 +97,6 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [rated, setRated] = useState<Record<string, 1 | -1>>({});
   const lastRequest = useRef<{ endpoint: string; body: Record<string, unknown> } | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -88,7 +105,14 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
   const stale = analysis !== null && !textIsSaved && analysis.prompt_version_id !== null;
   const finalText = editing ? edited : (revision?.revised_prompt ?? "");
 
-  const source = () => (prompt ? { prompt_id: prompt.id, version_id: prompt.versionId, ...(textIsSaved ? {} : { prompt_text: text }) } : { prompt_text: text });
+  // After an auto-save, further drafts of the same text belong to that saved prompt (no duplicates).
+  const savedContext = prompt ? { id: prompt.id, versionId: prompt.versionId } : autoSaved ? { id: autoSaved.promptId, versionId: autoSaved.originalVersionId } : null;
+  const source = () =>
+    prompt
+      ? { prompt_id: prompt.id, version_id: prompt.versionId, ...(textIsSaved ? {} : { prompt_text: text }) }
+      : autoSaved && text === autoSaved.text
+        ? { prompt_id: autoSaved.promptId, version_id: autoSaved.originalVersionId }
+        : { prompt_text: text };
 
   async function run<T>(kind: NonNullable<typeof busy>, fn: () => Promise<T>) {
     setBusy(kind);
@@ -147,6 +171,7 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
   }
 
   function pushRevision(result: IntelligenceRevision, ids: Set<string>) {
+    if (result.auto_saved && !prompt) setAutoSaved({ promptId: result.auto_saved.prompt_id, originalVersionId: result.auto_saved.original_version_id, proposedVersionId: result.auto_saved.proposed_version_id, revisionId: result.revision_id, text });
     setRevisions((list) => {
       const next = [...list, result];
       setActive(next.length - 1);
@@ -160,7 +185,13 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
 
   async function again() {
     if (!lastRequest.current) return;
-    const { endpoint, body } = lastRequest.current;
+    // Re-run the last request against the current source (after an auto-save that is the saved prompt).
+    const { prompt_text: _t, prompt_id: _p, version_id: _v, ...rest } = lastRequest.current.body;
+    void _t;
+    void _p;
+    void _v;
+    const { endpoint } = lastRequest.current;
+    const body = { ...rest, ...source() };
     const result = await run("again", () => api<IntelligenceRevision>(endpoint, { method: "POST", body }));
     if (result) pushRevision(result, new Set());
   }
@@ -193,61 +224,34 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
   async function save() {
     if (!revision) return;
     const isEdited = editing && edited !== revision.revised_prompt;
-    const result = await run("save", async () => {
-      if (prompt) {
-        const version = await api<{ id: string; version_number: number }>(`/api/v1/prompts/${prompt.id}/versions`, {
-          method: "POST",
-          body: {
-            prompt_text: finalText,
-            optimisation_id: revision.revision_id,
-            provenance: isEdited ? "user_edited" : "ai_optimised",
-            change_summary: revision.key_improvements.slice(0, 6),
-            suggestion_ids: revision.suggestion_ids,
-          },
-        });
-        return { kind: "version" as const, version };
-      }
-      const created = await api<{ id: string }>("/api/v1/prompts", {
+    const isAutoSavedDraft = autoSaved?.revisionId === revision.revision_id;
+    if (!savedContext) {
+      setDialog("save"); // title, category and tags for a new library prompt
+      return;
+    }
+    const result = await run("save", async () =>
+      api<{ id: string; version_number: number }>(`/api/v1/prompts/${savedContext.id}/versions`, {
         method: "POST",
-        body: {
-          category: TO_TASK_CATEGORY[revision.category as IntentCategory] ?? "general",
-          target_model: model,
-          versions: [
-            { prompt_text: revision.original_prompt, provenance: "original" },
-            { prompt_text: finalText, provenance: isEdited ? "user_edited" : "ai_optimised", change_summary: revision.key_improvements.slice(0, 6) },
-          ],
-        },
-      });
-      return { kind: "prompt" as const, id: created.id };
-    });
+        body: isAutoSavedDraft
+          ? { prompt_text: finalText, provenance: "user_edited", parent_version_id: autoSaved!.proposedVersionId, change_summary: ["Edited by you after review."] }
+          : {
+              prompt_text: finalText,
+              optimisation_id: revision.revision_id,
+              provenance: isEdited ? "user_edited" : "ai_optimised",
+              change_summary: revision.key_improvements.slice(0, 6),
+              suggestion_ids: revision.suggestion_ids,
+            },
+      }),
+    );
     if (!result) return;
-    if (result.kind === "version") {
-      setNotice(`Saved as version ${result.version.version_number}. The original is unchanged in the history.`);
-      router.refresh();
-    } else {
-      router.push(`/app/library/${result.id}`);
-    }
-  }
-
-  async function rate(value: 1 | -1) {
-    if (!revision) return;
-    setRated((r) => ({ ...r, [revision.revision_id]: value }));
-    try {
-      await api(`/api/v1/optimisations/${revision.revision_id}/feedback`, { method: "POST", body: { rating: value } });
-    } catch (err) {
-      setError(errorMessage(err));
-    }
+    setNotice(`Saved as version ${result.version_number}. The original is unchanged in the history.`);
+    if (prompt) router.refresh();
   }
 
   async function copy() {
     await navigator.clipboard.writeText(finalText);
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
-  }
-
-  function exportFile(ext: "md" | "txt") {
-    const name = (prompt?.title ?? analysis?.classification.objective ?? "prompt").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "prompt";
-    triggerDownload(new Blob([finalText], { type: ext === "md" ? "text/markdown" : "text/plain" }), `${name}.${ext}`);
   }
 
   const visibleSuggestions = useMemo(() => (analysis?.suggestions ?? []).filter((s) => statuses[s.id] !== "dismissed"), [analysis, statuses]);
@@ -258,10 +262,20 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
     <div className="space-y-6">
       {!embedded ? (
         <header className="max-w-3xl">
-          <h1>Prompt intelligence</h1>
+          <h1>Studio</h1>
           <p className="mt-2 text-ink-soft">
-            Analyse a prompt, see exactly what it is missing, then generate a detailed or a token-efficient version. Every requirement you wrote is checked in the result, and nothing is saved until you choose to.
+            Write or paste a prompt. Analyse it to see what is missing, then optimise it in the mode you choose. Every requirement you wrote is checked in the result, with token and cost figures before you use it.
           </p>
+          {studio ? (
+            <div className="mt-3 flex flex-wrap gap-2 text-sm">
+              <Link href="/app/settings" className="badge no-underline hover:border-line-strong" title="Change in Settings">
+                Auto-save {studio.historyEnabled ? "on: results go to My prompts" : "off: nothing is saved unless you choose"}
+              </Link>
+              <Link href="/app/preferences" className="badge no-underline hover:border-line-strong" title="Manage in Preferences">
+                {studio.personalisationEnabled ? `${studio.savedPreferenceCount} saved preference${studio.savedPreferenceCount === 1 ? "" : "s"} applied` : "Saved preferences off"}
+              </Link>
+            </div>
+          ) : null}
         </header>
       ) : null}
 
@@ -347,13 +361,7 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
               Optimise prompt
             </Button>
           </div>
-          {analysis?.token_estimate ? (
-            <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-              {formatNumber(analysis.token_estimate.token_count)} tokens for {analysis.token_estimate.model}
-              {analysis.token_estimate.cost ? ` · about ${formatMoney(analysis.token_estimate.cost.input_cost)} input cost` : ""}
-              <EstimateBadge method="tokenizer" />
-            </p>
-          ) : null}
+          <LiveTokenCount text={text} model={model} maxChars={studio?.maxPromptChars} />
         </section>
 
         {/* Analysis */}
@@ -570,6 +578,39 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
             Counted with the {revision.estimate.model} tokenizer. {revision.estimate.tokens_saved < 0 ? "The proposal is longer than the original; that is expected when detail is added." : ""}
             <EstimateBadge method="tokenizer" />
           </p>
+          {revision.auto_saved ? (
+            <p className="mt-3 text-sm text-ink-soft">
+              Auto-save is on, so the original and this proposal were saved to{" "}
+              <Link href={`/app/library/${revision.auto_saved.prompt_id}`} className="underline">
+                My prompts
+              </Link>
+              . Further drafts and edits are added to the same prompt only when you save them.
+            </p>
+          ) : null}
+          {revision.auto_save_skipped === "library_full" ? <Alert tone="warning" className="mt-3">Your library is full, so this result was not auto-saved. Delete old prompts or upgrade to keep saving.</Alert> : null}
+          {revision.preferences_applied && (Object.keys(revision.preferences_applied.effective).length || revision.preferences_applied.skipped_because_prompt_says_otherwise.length) ? (
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-sm">
+              <span className="text-ink-soft">Your saved preferences:</span>
+              {Object.entries(revision.preferences_applied.effective).map(([k, v]) => (
+                <Badge key={k} tone="accent">
+                  {k}: {String(v).replace(/_/g, " ")}
+                </Badge>
+              ))}
+              {revision.preferences_applied.skipped_because_prompt_says_otherwise.map((k) => (
+                <Badge key={k} title="Your prompt already says something about this, so the prompt wins.">
+                  {k}: kept from your prompt
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+          {studio ? (
+            <details className="mt-4 rounded-lg border border-line">
+              <summary className="cursor-pointer px-4 py-2.5 text-sm font-medium">Cost details: answer length and cost per request</summary>
+              <div className="border-t border-line p-4">
+                <TokenCostPanel original={revision.original_prompt} optimised={finalText} models={studio.modelOptions} model={model} onModelChange={setModel} outputPreset={outputPreset} onOutputPresetChange={setOutputPreset} actualUsage={revision.actual_usage as never} />
+              </div>
+            </details>
+          ) : null}
           {revision.budget.requested ? (
             <Alert tone={revision.budget.met ? "success" : "warning"} className="mt-3" title={revision.budget.met ? `Within your ${revision.budget.requested}-token budget` : "Budget not met safely"}>
               {revision.budget.explanation ?? "Every requirement was kept."}
@@ -608,12 +649,9 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
                 {copied ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
                 {copied ? "Copied" : "Copy"}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => exportFile("md")}>
+              <Button size="sm" variant="ghost" onClick={() => setDialog("export")}>
                 <Download className="h-4 w-4" aria-hidden="true" />
-                .md
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => exportFile("txt")}>
-                .txt
+                Export
               </Button>
             </div>
           </div>
@@ -697,32 +735,57 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
 
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
             <div className="flex flex-wrap gap-2">
-              <Button variant="primary" onClick={save} loading={busy === "save"} disabled={busy !== null || !finalText.trim()}>
-                <Check className="h-4 w-4" aria-hidden="true" />
-                {prompt ? "Accept and save as new version" : "Accept and save to My prompts"}
-              </Button>
+              {autoSaved?.revisionId === revision.revision_id && !(editing && edited !== revision.revised_prompt) ? (
+                <Link href={`/app/library/${autoSaved.promptId}`} className="btn btn-secondary">
+                  <Check className="h-4 w-4" aria-hidden="true" />
+                  Saved to My prompts
+                </Link>
+              ) : (
+                <Button variant="primary" onClick={save} loading={busy === "save"} disabled={busy !== null || !finalText.trim()}>
+                  <Check className="h-4 w-4" aria-hidden="true" />
+                  {autoSaved?.revisionId === revision.revision_id ? "Save my edits as a new version" : savedContext ? "Accept and save as new version" : "Accept and save to My prompts"}
+                </Button>
+              )}
               <Button onClick={again} loading={busy === "again"} disabled={busy !== null || !lastRequest.current}>
                 <RotateCcw className="h-4 w-4" aria-hidden="true" />
                 Generate another version
               </Button>
-              {prompt ? (
-                <Link href={`/app/library/${prompt.id}#versions`} className="btn btn-ghost">
+              {savedContext ? (
+                <Link href={`/app/library/${savedContext.id}#versions`} className="btn btn-ghost">
                   Restore an earlier version
                 </Link>
               ) : null}
             </div>
-            <div className="flex items-center gap-1 text-sm text-ink-soft">
-              <span className="mr-1">Was this helpful?</span>
-              <Button size="sm" variant={rated[revision.revision_id] === 1 ? "primary" : "ghost"} onClick={() => rate(1)} aria-pressed={rated[revision.revision_id] === 1} aria-label="Helpful">
-                <ThumbsUp className="h-4 w-4" aria-hidden="true" />
-              </Button>
-              <Button size="sm" variant={rated[revision.revision_id] === -1 ? "primary" : "ghost"} onClick={() => rate(-1)} aria-pressed={rated[revision.revision_id] === -1} aria-label="Not helpful">
-                <ThumbsDown className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </div>
+          </div>
+          <div className="mt-4">
+            <FeedbackPanel key={revision.revision_id} optimisationId={revision.revision_id} category={TO_TASK_CATEGORY[revision.category as IntentCategory] ?? "general"} />
           </div>
           <p className="mt-3 text-[0.8125rem] text-ink-faint">The original is never overwritten. A more detailed or a shorter prompt is not guaranteed to produce a better answer; try it on your real task.</p>
         </section>
+      ) : null}
+      {revision ? (
+        <SaveExportDialog
+          key={`${revision.revision_id}:${dialog}`}
+          open={dialog !== null}
+          mode={dialog ?? "export"}
+          onClose={() => setDialog(null)}
+          input={{
+            originalText: revision.original_prompt,
+            proposedText: revision.revised_prompt,
+            finalText,
+            changeSummary: revision.key_improvements.slice(0, 6),
+            category: TO_TASK_CATEGORY[revision.category as IntentCategory] ?? "general",
+            savedPromptId: autoSaved?.revisionId === revision.revision_id ? autoSaved.promptId : null,
+            savedVersionIds: autoSaved?.revisionId === revision.revision_id ? { original: autoSaved.originalVersionId, optimised: autoSaved.proposedVersionId } : null,
+            optimisationId: revision.revision_id,
+            targetModel: model,
+            outputPreset,
+          }}
+          onSaved={(saved) => {
+            setDialog(null);
+            router.push(`/app/library/${saved.id}`);
+          }}
+        />
       ) : null}
     </div>
   );

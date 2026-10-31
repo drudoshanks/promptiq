@@ -78,6 +78,8 @@ export interface RenderOptions {
   acceptedChanges?: string[];
   customObjective?: string | null;
   questions?: Array<{ key: string; question: string }>;
+  /** Lines from the user's saved preferences (already filtered against the prompt). */
+  preferenceLines?: string[];
 }
 
 function sectionContent(section: TemplateSection, ir: IntentRepresentation, opts: RenderOptions, used: Set<string>): string[] {
@@ -107,7 +109,7 @@ const bullets = (items: string[]) => items.map((i) => (i.startsWith("```") ? i :
 /** Deterministic renderer: used by the local provider and as a safe fallback. */
 export function renderPrompt(ir: IntentRepresentation, template: PromptTemplate, opts: RenderOptions): string {
   if (opts.mode === "token_saver") {
-    return compress([ir.objective, ...ir.context, ...ir.requirements, ...ir.constraints, ...ir.output_format].join("\n")).text;
+    return compress([ir.objective, ...ir.context, ...ir.requirements, ...ir.constraints, ...ir.output_format, ...(opts.preferenceLines ?? [])].join("\n")).text;
   }
   const detailed = opts.mode === "detailed" || opts.mode === "quality_first";
   const used = new Set<string>();
@@ -140,6 +142,9 @@ export function renderPrompt(ir: IntentRepresentation, template: PromptTemplate,
     }
   }
   blocks.push(...extras);
+  if (opts.preferenceLines?.length) {
+    blocks.push(`${detailed ? "## " : ""}Preferences (from your saved settings)${detailed ? "" : ":"}\n${opts.preferenceLines.map((l) => `- ${l}`).join("\n")}`);
+  }
   if (!detailed && ir.missing_information.length) {
     blocks.push(`If any of these matter and are unclear, ask first: ${ir.missing_information.map((k) => k.replace(/_/g, " ")).join(", ")}.`);
   }

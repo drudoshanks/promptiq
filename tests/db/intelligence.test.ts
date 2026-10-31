@@ -211,3 +211,39 @@ describe("validation and feedback controls", () => {
     expect(await t.db.query.promptFeedbackEvents.findMany({ where: eq(promptFeedbackEvents.userId, user.id) })).toHaveLength(0);
   });
 });
+
+describe("studio: saved preferences and auto-save", () => {
+  it("applies saved preferences unless the prompt says otherwise, and auto-saves once", async () => {
+    const { upsertPreference } = await import("@/lib/services/preferences");
+    const { listPrompts } = await import("@/lib/services/prompts");
+    const user = await createUser(t.db, "studio-auto");
+    await upsertPreference(t.db, user.id, { category: "general", preferenceKey: "tone", preferenceValue: { value: "friendly" }, source: "user_entered" });
+    await upsertPreference(t.db, user.id, { category: "general", preferenceKey: "format", preferenceValue: { value: "bullet_points" }, source: "user_entered" });
+
+    const r = await reviseForUser(ctx(user), { source: { text: "Write a newsletter intro about our spring sale as a short paragraph." }, mode: "balanced" });
+    expect(r.preferences_applied.effective).toEqual({ tone: "friendly" });
+    expect(r.preferences_applied.skipped_because_prompt_says_otherwise).toEqual(["format"]);
+    expect(r.revised_prompt).toContain("Use a warm, friendly tone.");
+    expect(r.revised_prompt).not.toContain("bullet points");
+    expect(r.auto_saved).not.toBeNull();
+    const saved = await getPrompt(t.db, user.id, r.auto_saved!.prompt_id);
+    expect(saved.versions.map((v) => v.provenance)).toEqual(["original", "ai_optimised"]);
+    const run = await t.db.query.optimisationRuns.findFirst({ where: eq(optimisationRuns.id, r.revision_id) });
+    expect(run).toMatchObject({ promptId: saved.id, resultVersionId: r.auto_saved!.proposed_version_id });
+
+    // A further draft of the saved prompt is not auto-saved again.
+    const again = await reviseForUser(ctx(user), { source: { promptId: saved.id, versionId: r.auto_saved!.original_version_id }, mode: "detailed" });
+    expect(again.auto_saved).toBeNull();
+    expect((await listPrompts(t.db, user.id)).total).toBe(1);
+  });
+
+  it("does not auto-save when the setting is off, and ignores preferences when personalisation is off", async () => {
+    const { upsertPreference } = await import("@/lib/services/preferences");
+    const user = await createUser(t.db, "studio-off", { historyEnabled: false, personalisationEnabled: false });
+    await upsertPreference(t.db, user.id, { category: "general", preferenceKey: "tone", preferenceValue: { value: "formal" }, source: "user_entered" });
+    const r = await reviseForUser(ctx(user), { source: { text: "Write a thank-you note to our volunteers." }, mode: "balanced" });
+    expect(r.auto_saved).toBeNull();
+    expect(r.preferences_applied.effective).toEqual({});
+    expect(r.revised_prompt).not.toContain("formal tone");
+  });
+});

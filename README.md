@@ -94,12 +94,16 @@ preferences. Design, metrics definitions and privacy rules:
 
 ## Prompt intelligence
 
-`/app/intelligence` (also embedded on every saved prompt) classifies the task,
+The **Studio** (`/app/studio`, also embedded on every saved prompt; the old
+Quick studio and `/app/intelligence` now open it) classifies the task,
 scores completeness with a configurable weighted rubric, extracts the prompt's
 requirements, lists missing information, and ranks suggestions by your own
 feedback. It generates detailed, balanced, token-saver, quality-first or custom
 revisions, checks every requirement survived (repairing drops), and compares
-tokens and cost before saving a new version. Algorithms, API, data model and
+tokens and cost before saving a new version. Revisions apply your saved
+preferences (unless the prompt says otherwise), show a live token count as you
+type, and, when auto-save is on, store the original and first proposal in My
+prompts. Algorithms, API, data model and
 evaluation: [`docs/prompt-intelligence.md`](docs/prompt-intelligence.md).
 Evaluate with `npm run eval:intelligence`.
 

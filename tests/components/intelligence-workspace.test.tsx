@@ -60,7 +60,11 @@ const revision = {
   actual_usage: {},
   suggestion_ids: [],
   template_version: "t",
+  preferences_applied: { effective: { tone: "friendly" }, skipped_because_prompt_says_otherwise: ["format"], personalisation_enabled: true },
+  auto_saved: null as null | { prompt_id: string; original_version_id: string; proposed_version_id: string },
+  auto_save_skipped: null,
 };
+let nextRevision = revision;
 
 const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(status < 400 ? { data } : data), { status, headers: { "content-type": "application/json" } });
@@ -73,7 +77,8 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return json({ error: { code: "QUOTA_EXCEEDED", message: "You have used all 30 prompt analyses for this period." } }, 429);
   }
   if (url.endsWith("/analyse")) return json(analysis, 201);
-  if (url.endsWith("/optimise") || url.endsWith("/generate")) return json(revision, 201);
+  if (url.endsWith("/optimise") || url.endsWith("/generate")) return json(nextRevision, 201);
+  if (url.endsWith("/token-estimates")) return json({ model: "gpt-5-mini", token_count: 4, character_count: 26, cost: null });
   if (url.endsWith("/validate")) return json({ preservation: { ...revision.preservation, status: "failed", summary: "1 essential requirement is missing or reversed." }, estimate: { ...revision.estimate, optimised: count(2) } });
   if (url === "/api/v1/prompts") return json({ id: "p-new" }, 201);
   return json({ recorded: true }, 201);
@@ -81,8 +86,16 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
 
 beforeEach(() => {
   calls.length = 0;
+  nextRevision = revision;
   vi.stubGlobal("fetch", fetchMock);
   Element.prototype.scrollIntoView = vi.fn();
+  // jsdom has no <dialog> modal API.
+  HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+    this.removeAttribute("open");
+  };
 });
 afterEach(() => {
   cleanup();
@@ -133,11 +146,13 @@ describe("Prompt intelligence workspace", () => {
     fireEvent.click(screen.getByRole("button", { name: /Check requirements in my edit/ }));
     expect(await screen.findAllByText(/1 essential requirement is missing/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Accept and save to My prompts/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save prompt" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/app/library/p-new"));
     const created = calls.find((c) => c.url === "/api/v1/prompts")!;
     expect(created.body.versions).toEqual([
       { prompt_text: PROMPT, provenance: "original" },
-      { prompt_text: "Build it", provenance: "user_edited", change_summary: ["Applied 1 accepted suggestion."] },
+      { prompt_text: revision.revised_prompt, provenance: "ai_optimised", change_summary: ["Applied 1 accepted suggestion."] },
+      { prompt_text: "Build it", provenance: "user_edited", change_summary: ["Edited by you after review."] },
     ]);
   });
 
@@ -152,5 +167,40 @@ describe("Prompt intelligence workspace", () => {
     failNext = true;
     fireEvent.click(screen.getByRole("button", { name: /Generate detailed prompt/ }));
     expect(await screen.findByText(/used all 30 prompt analyses/)).toBeTruthy();
+  });
+});
+
+describe("Studio additions", () => {
+  it("shows the live token count, auto-save state and applied preferences, and never saves a draft twice", async () => {
+    nextRevision = { ...revision, auto_saved: { prompt_id: "p-auto", original_version_id: "v1", proposed_version_id: "v2" } };
+    render(
+      <IntelligenceWorkspace
+        models={[{ id: "gpt-5-mini", label: "GPT-5 mini" }]}
+        defaultModel="gpt-5-mini"
+        defaultMode="balanced"
+        studio={{ historyEnabled: true, personalisationEnabled: true, savedPreferenceCount: 2, maxPromptChars: 4000, modelOptions: [] }}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Studio" })).toBeTruthy();
+    expect(screen.getByText(/Auto-save on/)).toBeTruthy();
+    expect(screen.getByText("2 saved preferences applied")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: PROMPT } });
+    expect(await screen.findByText("4 tokens")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Optimise prompt/ }));
+    expect(await screen.findByText("Proposed prompt")).toBeTruthy();
+    expect(screen.getByText("tone: friendly")).toBeTruthy();
+    expect(screen.getByText("format: kept from your prompt")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Saved to My prompts/ }).getAttribute("href")).toBe("/app/library/p-auto");
+    expect(screen.getAllByRole("button", { name: /helpful/i }).length).toBeGreaterThan(0);
+
+    // The next draft goes to the auto-saved prompt instead of creating another one.
+    nextRevision = { ...revision, revision_id: "22222222-2222-4222-8222-222222222222" };
+    fireEvent.click(screen.getByRole("button", { name: /Generate another version/ }));
+    await screen.findByRole("tab", { name: "Draft 2" });
+    const second = calls.filter((c) => c.url.endsWith("/optimise")).at(-1)!;
+    expect(second.body).toMatchObject({ prompt_id: "p-auto", version_id: "v1" });
+    expect(second.body.prompt_text).toBeUndefined();
+    expect(screen.getByRole("button", { name: /Accept and save as new version/ })).toBeTruthy();
   });
 });
