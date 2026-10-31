@@ -1,9 +1,11 @@
 import { asc, eq } from "drizzle-orm";
 
-import { feedback, prompts, promptVersions, userPreferences, type AppUser } from "@/lib/db/schema";
+import { feedback, promptAnalyses, prompts, promptSuggestions, promptVersions, userPreferences, type AppUser } from "@/lib/db/schema";
 import type { DbOrTx } from "@/lib/db/types";
 
+import { serialiseAnalysis, serialiseSuggestion } from "./analysis";
 import { serialiseFeedback } from "./feedback";
+import { getPromptPreferences, serialisePromptPreferences } from "./prompt-preferences";
 import { serialisePreference } from "./preferences";
 import { serialisePrompt, serialiseVersion } from "./prompts";
 
@@ -28,6 +30,11 @@ export async function buildAccountExport(db: DbOrTx, user: AppUser) {
     }),
     db.query.feedback.findMany({ where: eq(feedback.userId, user.id), orderBy: [asc(feedback.createdAt)] }),
   ]);
+  const [analysisRows, suggestionRows, promptPrefs] = await Promise.all([
+    db.query.promptAnalyses.findMany({ where: eq(promptAnalyses.userId, user.id), orderBy: [asc(promptAnalyses.createdAt)] }),
+    db.query.promptSuggestions.findMany({ where: eq(promptSuggestions.userId, user.id), orderBy: [asc(promptSuggestions.createdAt), asc(promptSuggestions.position)] }),
+    getPromptPreferences(db, user.id),
+  ]);
 
   return {
     format: ACCOUNT_EXPORT_FORMAT,
@@ -47,6 +54,9 @@ export async function buildAccountExport(db: DbOrTx, user: AppUser) {
       versions: p.versions.map(serialiseVersion),
     })),
     feedback: feedbackRows.map(serialiseFeedback),
+    prompt_preferences: serialisePromptPreferences(promptPrefs),
+    analyses: analysisRows.map(serialiseAnalysis),
+    suggestions: suggestionRows.map(serialiseSuggestion),
   };
 }
 

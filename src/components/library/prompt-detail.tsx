@@ -3,7 +3,8 @@
 import { Check, Copy } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { Star } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { DiffView } from "@/components/diff-view";
 import { Alert } from "@/components/ui/alert";
@@ -24,9 +25,12 @@ interface PromptDetailProps {
   maxVersions: number;
   /** Model the final count is recorded against at export. */
   defaultModel: string;
+  models: Array<{ id: string; label: string }>;
+  /** Suggestions and optimisation workspace, rendered above the version history. */
+  workspace?: ReactNode;
 }
 
-export function PromptDetail({ prompt: initial, maxVersions, defaultModel }: PromptDetailProps) {
+export function PromptDetail({ prompt: initial, maxVersions, defaultModel, models, workspace }: PromptDetailProps) {
   const router = useRouter();
   const [prompt, setPrompt] = useState(initial);
   const versions = useMemo(() => [...prompt.versions].sort((a, b) => b.version_number - a.version_number), [prompt.versions]);
@@ -40,6 +44,8 @@ export function PromptDetail({ prompt: initial, maxVersions, defaultModel }: Pro
   const [title, setTitle] = useState(prompt.title);
   const [category, setCategory] = useState<TaskCategory>((prompt.category as TaskCategory) ?? "general");
   const [tags, setTags] = useState(prompt.tags.join(", "));
+  const [description, setDescription] = useState(prompt.description ?? "");
+  const [targetModel, setTargetModel] = useState(prompt.target_model ?? "");
   const [metaBusy, setMetaBusy] = useState(false);
   const [metaMessage, setMetaMessage] = useState<string | null>(null);
 
@@ -59,7 +65,13 @@ export function PromptDetail({ prompt: initial, maxVersions, defaultModel }: Pro
     try {
       const updated = await api<PromptDetailResponse>(`/api/v1/prompts/${prompt.id}`, {
         method: "PATCH",
-        body: { title: title.trim() || prompt.title, category, tags: tags.split(",").map((t) => t.trim()).filter(Boolean) },
+        body: {
+          title: title.trim() || prompt.title,
+          category,
+          tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+          description: description.trim() || null,
+          target_model: targetModel || null,
+        },
       });
       setPrompt((p) => ({ ...p, ...updated, versions: p.versions }));
       setMetaMessage("Details saved.");
@@ -127,6 +139,7 @@ export function PromptDetail({ prompt: initial, maxVersions, defaultModel }: Pro
     }
     const body = renderExport(prompt, selected, format);
     triggerDownload(new Blob([body], { type: exportMimeType(format) }), exportFileName(prompt, selected, format));
+    void markUsed();
   }
 
   async function copySelected() {
@@ -134,6 +147,39 @@ export function PromptDetail({ prompt: initial, maxVersions, defaultModel }: Pro
     await navigator.clipboard.writeText(selected.prompt_text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    void markUsed();
+  }
+
+  /** Copy/export counts as using the prompt ("recently used", "most used"). */
+  async function markUsed() {
+    try {
+      await api(`/api/v1/prompts/${prompt.id}/use`, { method: "POST" });
+    } catch {
+      // informational only
+    }
+  }
+
+  async function toggleFavourite() {
+    setMetaBusy(true);
+    try {
+      const updated = await api<PromptDetailResponse>(`/api/v1/prompts/${prompt.id}`, { method: "PATCH", body: { is_favourite: !prompt.is_favourite } });
+      setPrompt((p) => ({ ...p, ...updated, versions: p.versions }));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setMetaBusy(false);
+    }
+  }
+
+  async function duplicate() {
+    setMetaBusy(true);
+    try {
+      const copy = await api<PromptDetailResponse>(`/api/v1/prompts/${prompt.id}/duplicate`, { method: "POST" });
+      router.push(`/app/library/${copy.id}`);
+    } catch (err) {
+      setError(errorMessage(err));
+      setMetaBusy(false);
+    }
   }
 
   if (!selected) {
@@ -145,17 +191,22 @@ export function PromptDetail({ prompt: initial, maxVersions, defaultModel }: Pro
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm text-ink-soft">
-            <Link href="/app/library">Library</Link>
+            <Link href="/app/library">My prompts</Link>
           </p>
           <h1 className="mt-1 break-words">{prompt.title}</h1>
+          {prompt.description ? <p className="mt-2 text-ink-soft">{prompt.description}</p> : null}
           <p className="mt-2 text-sm text-ink-soft">
             {versions.length} of {maxVersions} versions. Versions are immutable; editing creates a new one.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link href={`/app/studio?prompt=${prompt.id}&version=${selected.id}`} className="btn btn-primary">
-            Optimise again
-          </Link>
+          <button type="button" className="btn btn-secondary" aria-pressed={prompt.is_favourite} onClick={toggleFavourite} disabled={metaBusy}>
+            <Star className="h-4 w-4" aria-hidden="true" fill={prompt.is_favourite ? "currentColor" : "none"} />
+            {prompt.is_favourite ? "Favourite" : "Add to favourites"}
+          </button>
+          <Button onClick={duplicate} disabled={metaBusy}>
+            Duplicate
+          </Button>
           <Button onClick={toggleArchive} loading={metaBusy}>
             {prompt.archived_at ? "Unarchive" : "Archive"}
           </Button>
@@ -167,6 +218,11 @@ export function PromptDetail({ prompt: initial, maxVersions, defaultModel }: Pro
 
       {error ? <Alert tone="error">{error}</Alert> : null}
 
+      {workspace}
+
+      <h2 id="versions" className="scroll-mt-24 text-lg">
+        Versions
+      </h2>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="space-y-5">
           <div className="flex flex-wrap items-center gap-3">
@@ -280,6 +336,21 @@ export function PromptDetail({ prompt: initial, maxVersions, defaultModel }: Pro
                     {TASK_CATEGORIES.map((c) => (
                       <option key={c} value={c}>
                         {CATEGORY_LABELS[c]}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+              <Field label="Description" help="What this prompt is for (optional).">
+                {(p) => <Textarea id={p.id} rows={2} maxLength={1000} value={description} onChange={(e) => setDescription(e.target.value)} className="font-sans" aria-describedby={p.describedBy} />}
+              </Field>
+              <Field label="Target model">
+                {(p) => (
+                  <Select id={p.id} value={targetModel} onChange={(e) => setTargetModel(e.target.value)}>
+                    <option value="">Not set (uses the default)</option>
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
                       </option>
                     ))}
                   </Select>

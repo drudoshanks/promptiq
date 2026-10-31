@@ -4,16 +4,16 @@ import { env } from "@/lib/env";
 
 import { MockOptimiserProvider } from "./mock";
 import { OpenAIOptimiserProvider } from "./openai";
-import type { OptimiserProvider } from "./types";
+import type { AiProvider } from "./types";
 
 declare global {
-  var __promptiqProvider: OptimiserProvider | undefined;
+  var __promptiqProvider: AiProvider | undefined;
 }
 
 /** Process-wide provider instance so the circuit breaker state is shared. */
-export function getOptimiserProvider(): OptimiserProvider {
+export function getOptimiserProvider(): AiProvider {
   if (globalThis.__promptiqProvider) return globalThis.__promptiqProvider;
-  const provider: OptimiserProvider =
+  const provider: AiProvider =
     env.OPTIMISER_PROVIDER === "openai"
       ? new OpenAIOptimiserProvider({
           apiKey: env.OPENAI_API_KEY as string,

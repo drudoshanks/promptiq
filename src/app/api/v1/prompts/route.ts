@@ -11,7 +11,13 @@ export const GET = withApi({ auth: "required" }, async ({ request, user }) => {
     search: query.search,
     category: query.category,
     tag: query.tag,
-    includeArchived: query.include_archived,
+    targetModel: query.target_model,
+    favourite: query.favourite,
+    optimisation: query.optimisation,
+    priority: query.priority,
+    sort: query.sort,
+    includeArchived: query.include_archived || query.archived === "include",
+    archivedOnly: query.archived === "only",
     page: query.page,
     pageSize: query.page_size,
   });
@@ -19,6 +25,7 @@ export const GET = withApi({ auth: "required" }, async ({ request, user }) => {
     items: result.items.map((p) => ({
       ...serialisePrompt(p),
       version_count: p.versionCount,
+      preview: p.latestVersion ? p.latestVersion.promptText.replace(/\s+/g, " ").slice(0, 160) : null,
       latest_version: p.latestVersion ? serialiseVersion(p.latestVersion) : null,
     })),
     page: result.page,
@@ -32,6 +39,8 @@ export const POST = withApi({ auth: "required", rateLimit: "userPerMinute" }, as
   const body = await parseJson(request, createPromptSchema);
   const prompt = await createPrompt(db, user.id, planFor(user.planCode), {
     title: body.title,
+    description: body.description,
+    targetModel: body.target_model,
     category: body.category,
     tags: body.tags,
     versions: body.versions.map((v) => ({

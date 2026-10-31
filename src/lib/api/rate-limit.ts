@@ -68,6 +68,8 @@ export const RATE_LIMITS = {
   optimisePerMinute: { limit: 8, windowMs: 60_000 },
   /** Any API call per client IP (sized to allow debounced counting while typing). */
   ipPerMinute: { limit: 240, windowMs: 60_000 },
+  /** AI prompt analyses per authenticated user. */
+  analysePerMinute: { limit: 6, windowMs: 60_000 },
   /** Token counting while typing (debounced client-side, ~300 ms). */
   estimatePerMinute: { limit: 120, windowMs: 60_000 },
   /** Account-wide expensive operations (exports). */

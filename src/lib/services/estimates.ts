@@ -246,6 +246,8 @@ export function serialiseTokenEstimate(row: TokenEstimate) {
 export interface RecordUsageInput {
   userId: string;
   runId: string | null;
+  /** Set instead of runId for prompt analyses. */
+  analysisId?: string | null;
   attempt: number;
   provider: string;
   modelId: string;
@@ -281,6 +283,7 @@ export async function recordApiUsage(db: DbOrTx, input: RecordUsageInput, now = 
     .values({
       userId: input.userId,
       runId: input.runId,
+      analysisId: input.analysisId ?? null,
       attempt: input.attempt,
       provider: input.provider,
       modelId: input.modelId,

@@ -156,13 +156,31 @@ export const prompts = pgTable(
     category: text("category").notNull().default("general"),
     tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
     archivedAt: tz("archived_at"),
+    description: text("description"),
+    targetModel: text("target_model"),
+    currentVersionId: uuid("current_version_id"),
+    isFavourite: boolean("is_favourite").notNull().default(false),
+    lastUsedAt: tz("last_used_at"),
+    useCount: integer("use_count").notNull().default(0),
+    // Denormalised, recomputed by refreshPromptStats() (migration 0004).
+    currentVersionNumber: integer("current_version_number").notNull().default(1),
+    originalTokenCount: integer("original_token_count"),
+    currentTokenCount: integer("current_token_count"),
+    optimisationCount: integer("optimisation_count").notNull().default(0),
+    latestOptimisationStatus: text("latest_optimisation_status"),
+    latestQualityScore: smallint("latest_quality_score"),
+    latestAnalysisAt: tz("latest_analysis_at"),
+    pendingSuggestionCount: integer("pending_suggestion_count").notNull().default(0),
+    pendingPriority: smallint("pending_priority").notNull().default(0),
+    latestEstimatedCost: numeric("latest_estimated_cost", { precision: 16, scale: 10 }),
+    latestPricingVersion: text("latest_pricing_version"),
     createdAt: tz("created_at").notNull().defaultNow(),
     updatedAt: tz("updated_at").notNull().defaultNow(),
   },
   (t) => [index("idx_prompts_user_updated").on(t.userId, t.updatedAt)],
 );
 
-export const PROVENANCES = ["original", "ai_optimised", "user_edited", "imported"] as const;
+export const PROVENANCES = ["original", "ai_optimised", "user_edited", "imported", "restored", "duplicated", "suggestion_applied"] as const;
 export type Provenance = (typeof PROVENANCES)[number];
 
 export const promptVersions = pgTable(
@@ -179,6 +197,9 @@ export const promptVersions = pgTable(
     changeSummary: jsonb("change_summary").$type<string[]>().notNull().default([]),
     tokenEstimate: integer("token_estimate"),
     tokenEstimateMethod: text("token_estimate_method"),
+    tokenizerVersion: text("tokenizer_version"),
+    createdBy: uuid("created_by"),
+    optimisationRunId: uuid("optimisation_run_id"),
     createdAt: tz("created_at").notNull().defaultNow(),
   },
   (t) => [
@@ -218,6 +239,13 @@ export const optimisationRuns = pgTable(
     estimatedCostUsd: numeric("estimated_cost_usd", { precision: 12, scale: 6 }),
     pricingVersion: text("pricing_version"),
     attemptCount: integer("attempt_count").notNull().default(1),
+    optimisationMode: text("optimisation_mode", { enum: ["balanced", "token_saver", "quality_first", "custom"] }).notNull().default("balanced"),
+    targetModel: text("target_model"),
+    tokensSaved: integer("tokens_saved"),
+    reductionPercent: numeric("reduction_percent", { precision: 7, scale: 2 }),
+    estimatedInputCostBefore: numeric("estimated_input_cost_before", { precision: 16, scale: 10 }),
+    estimatedInputCostAfter: numeric("estimated_input_cost_after", { precision: 16, scale: 10 }),
+    appliedSuggestionCount: integer("applied_suggestion_count").notNull().default(0),
     latencyMs: integer("latency_ms"),
     requestId: text("request_id"),
     errorCode: text("error_code"),
@@ -298,6 +326,7 @@ export const apiUsageRecords = pgTable(
       .notNull()
       .references(() => appUsers.id, { onDelete: "cascade" }),
     runId: uuid("run_id").references(() => optimisationRuns.id, { onDelete: "set null" }),
+    analysisId: uuid("analysis_id"),
     attempt: integer("attempt").notNull().default(1),
     provider: text("provider").notNull(),
     modelId: text("model_id").notNull(),
@@ -320,6 +349,103 @@ export const apiUsageRecords = pgTable(
     index("idx_api_usage_model_created").on(t.modelId, t.createdAt),
   ],
 );
+
+// ---------------------------------------------------------------------------
+// Prompt library: analyses, suggestions, prompt preferences (migration 0004)
+// ---------------------------------------------------------------------------
+export const ANALYSIS_STATUSES = ["running", "completed", "failed"] as const;
+
+export const promptAnalyses = pgTable(
+  "prompt_analyses",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    promptId: uuid("prompt_id")
+      .notNull()
+      .references(() => prompts.id, { onDelete: "cascade" }),
+    promptVersionId: uuid("prompt_version_id")
+      .notNull()
+      .references(() => promptVersions.id, { onDelete: "cascade" }),
+    status: text("status", { enum: ANALYSIS_STATUSES }).notNull(),
+    qualityScore: smallint("quality_score"),
+    alreadyOptimised: boolean("already_optimised").notNull().default(false),
+    analysisResult: jsonb("analysis_result").$type<Record<string, unknown>>().notNull().default({}),
+    targetModel: text("target_model"),
+    modelId: text("model_id").notNull(),
+    templateVersion: text("template_version").notNull(),
+    inputTokens: integer("input_tokens"),
+    outputTokens: integer("output_tokens"),
+    actualCost: numeric("actual_cost", { precision: 16, scale: 10 }),
+    errorCode: text("error_code"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+    completedAt: tz("completed_at"),
+  },
+  (t) => [index("idx_analyses_prompt_created").on(t.promptId, t.createdAt), index("idx_analyses_user_created").on(t.userId, t.createdAt)],
+);
+
+export const SUGGESTION_STATUSES = ["pending", "accepted", "dismissed", "deferred", "applied"] as const;
+export type SuggestionStatus = (typeof SUGGESTION_STATUSES)[number];
+export const SUGGESTION_PRIORITIES = ["high", "medium", "low"] as const;
+export type SuggestionPriority = (typeof SUGGESTION_PRIORITIES)[number];
+
+export const promptSuggestions = pgTable(
+  "prompt_suggestions",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    analysisId: uuid("analysis_id")
+      .notNull()
+      .references(() => promptAnalyses.id, { onDelete: "cascade" }),
+    promptId: uuid("prompt_id")
+      .notNull()
+      .references(() => prompts.id, { onDelete: "cascade" }),
+    promptVersionId: uuid("prompt_version_id")
+      .notNull()
+      .references(() => promptVersions.id, { onDelete: "cascade" }),
+    position: smallint("position").notNull(),
+    category: text("category").notNull(),
+    priority: text("priority", { enum: SUGGESTION_PRIORITIES }).notNull(),
+    title: text("title").notNull(),
+    explanation: text("explanation").notNull(),
+    recommendation: text("recommendation").notNull(),
+    estimatedTokenImpact: text("estimated_token_impact", { enum: ["none", "low", "medium", "high"] }),
+    tokenDirection: text("token_direction", { enum: ["reduce", "increase", "neutral"] }),
+    requiresUserContext: boolean("requires_user_context").notNull().default(false),
+    contextQuestion: text("context_question"),
+    status: text("status", { enum: SUGGESTION_STATUSES }).notNull().default("pending"),
+    appliedVersionId: uuid("applied_version_id"),
+    feedbackAt: tz("feedback_at"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    unique("prompt_suggestions_analysis_id_position_key").on(t.analysisId, t.position),
+    index("idx_suggestions_prompt_status").on(t.promptId, t.status),
+    index("idx_suggestions_user_status").on(t.userId, t.status, t.createdAt),
+  ],
+);
+
+export const OPTIMISATION_MODES = ["balanced", "token_saver", "quality_first", "custom"] as const;
+export type OptimisationMode = (typeof OPTIMISATION_MODES)[number];
+
+export const userPromptPreferences = pgTable("user_prompt_preferences", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => appUsers.id, { onDelete: "cascade" }),
+  preferredModel: text("preferred_model"),
+  preferredStyle: text("preferred_style", { enum: ["natural", "structured", "bullet_points", "step_by_step"] }),
+  preferredResponseLength: text("preferred_response_length", { enum: ["short", "medium", "long"] }),
+  tokenEfficiencyPriority: text("token_efficiency_priority", { enum: ["low", "balanced", "high"] }).notNull().default("balanced"),
+  defaultOptimisationMode: text("default_optimisation_mode", { enum: ["balanced", "token_saver", "quality_first"] }).notNull().default("balanced"),
+  domains: text("domains").array().notNull().default(sql`'{}'::text[]`),
+  learnFromFeedback: boolean("learn_from_feedback").notNull().default(true),
+  backgroundAnalysis: boolean("background_analysis").notNull().default(false),
+  preferencesJson: jsonb("preferences_json").$type<Record<string, unknown>>().notNull().default({}),
+  updatedAt: tz("updated_at").notNull().defaultNow(),
+});
 
 export const feedback = pgTable(
   "feedback",
@@ -439,6 +565,14 @@ export const promptVersionsRelations = relations(promptVersions, ({ one }) => ({
   prompt: one(prompts, { fields: [promptVersions.promptId], references: [prompts.id] }),
 }));
 
+export const promptAnalysesRelations = relations(promptAnalyses, ({ many }) => ({
+  suggestions: many(promptSuggestions),
+}));
+
+export const promptSuggestionsRelations = relations(promptSuggestions, ({ one }) => ({
+  analysis: one(promptAnalyses, { fields: [promptSuggestions.analysisId], references: [promptAnalyses.id] }),
+}));
+
 export const appUsersRelations = relations(appUsers, ({ many, one }) => ({
   prompts: many(prompts),
   preferences: many(userPreferences),
@@ -460,3 +594,6 @@ export type DeletionJob = typeof deletionJobs.$inferSelect;
 export type ModelPricing = typeof modelPricing.$inferSelect;
 export type TokenEstimate = typeof tokenEstimates.$inferSelect;
 export type ApiUsageRecord = typeof apiUsageRecords.$inferSelect;
+export type PromptAnalysis = typeof promptAnalyses.$inferSelect;
+export type PromptSuggestion = typeof promptSuggestions.$inferSelect;
+export type UserPromptPreferences = typeof userPromptPreferences.$inferSelect;

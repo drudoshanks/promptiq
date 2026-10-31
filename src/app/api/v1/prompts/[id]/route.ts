@@ -14,7 +14,15 @@ export const GET = withApi<"required", { id: string }>({ auth: "required" }, asy
 export const PATCH = withApi<"required", { id: string }>({ auth: "required", rateLimit: "userPerMinute" }, async ({ request, user, params }) => {
   const { id } = idParamSchema.parse(params);
   const body = await parseJson(request, updatePromptSchema);
-  const prompt = await updatePrompt(db, user.id, id, body);
+  const prompt = await updatePrompt(db, user.id, id, {
+    title: body.title,
+    description: body.description,
+    category: body.category,
+    tags: body.tags,
+    targetModel: body.target_model,
+    isFavourite: body.is_favourite,
+    archived: body.archived,
+  });
   return ok(serialisePrompt(prompt));
 });
 

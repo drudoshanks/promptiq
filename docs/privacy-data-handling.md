@@ -16,6 +16,15 @@ must stay true in code; the referenced files are where each rule is enforced.
 | Billing state | From verified Stripe webhooks only. | `src/lib/services/billing.ts` |
 | Security logs | Request ID, timing, status, model ID, usage counts. Prompt text and secrets are never logged; the logger redacts known field names as a backstop. | `src/lib/logger.ts` |
 
+## Prompt library
+
+Saved prompts are used only to provide features to their owner (search,
+versions, analysis, optimisation, dashboards). Analysis sends one prompt version
+at a time to the provider, never the library. Saved prompts are never used to
+train models. Analyses and suggestions contain no copy of the prompt text, are
+deleted with the prompt or account, and are included in the account export.
+See docs/prompt-library.md.
+
 ## Learning policy (FR-012, A-05)
 
 PromptIQ never converts a prompt, a rewrite or a feedback record into a

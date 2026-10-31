@@ -22,12 +22,27 @@ quota twice.
 | `GET /optimisations/{id}` | Run metadata, saved result (if history), feedback | 200 | 404 |
 | `POST /optimisations/{id}/feedback` | Rating ±1, reason, comment, optional `save_preference`, `replace` | 201 / 200 | 404, 409 |
 | `DELETE /optimisations/{id}/feedback` | Withdraw feedback | 204 | 404 |
-| `GET /prompts?search=&category=&tag=&page=&page_size=&include_archived=` | List with full-text search | 200 | 400 |
+| `GET /prompts?search=&category=&tag=&target_model=&favourite=&optimisation=&priority=&sort=&archived=&page=&page_size=` | List with search (title, text, tags), filters, sort (`recent`, `oldest`, `most_used`, `largest`, `most_saved`, `attention`) and pagination | 200 | 400 |
 | `POST /prompts` | Create with 1–3 initial versions | 201 | 400, 403 (plan limit) |
 | `GET /prompts/{id}` | Metadata and all versions | 200 | 404 |
-| `PATCH /prompts/{id}` | `title`, `category`, `tags`, `archived` | 200 | 400, 404 |
+| `PATCH /prompts/{id}` | `title`, `description`, `category`, `tags`, `target_model`, `is_favourite`, `archived` | 200 | 400, 404, 422 |
+| `PATCH /prompts/{id}/archive` | `{ "archived": bool }` | 200 | 404 |
+| `POST /prompts/{id}/duplicate` | New prompt from the current version | 201 | 403, 404 |
+| `POST /prompts/{id}/restore/{version_id}` | New version copied from an earlier one | 201 | 403, 404 |
+| `POST /prompts/{id}/use` | Record a copy/export (recently/most used) | 204 | 404 |
+| `GET /prompts/{id}/versions` | Version history | 200 | 404 |
+| `POST /prompts/{id}/analyse` | AI review of one version (`version_id?`, `force?`); 200 when a stored analysis is reused | 201 / 200 | 404, 409, 413, 429, 502, 504 |
+| `GET /prompts/{id}/suggestions?status=` | Latest analysis and suggestions | 200 | 404 |
+| `POST /prompts/{id}/optimise` | Proposal for `mode` (`balanced`, `token_saver`, `quality_first`, `custom` + `custom_objective`), `suggestion_ids`, `version_id`, `text`, `target_model`; creates no version | 200 | 400, 404, 409, 429, 502, 504 |
+| `GET /suggestions?status=` | Suggestions across the library | 200 | |
+| `PATCH /suggestions/{id}` | `{ "status": "accepted" \| "dismissed" \| "deferred" \| "pending" }`; `applied` is set by saving a version | 200 | 404, 409 |
+| `GET /dashboard/summary` | Library summary cards | 200 | |
+| `GET /dashboard/analytics` | Suggestion, run and usage analytics, recent activity | 200 | |
+| `GET /dashboard/history?page=` | Optimisation runs across the library | 200 | |
+| `GET`, `PATCH /preferences/prompts` | Prompt preferences (+ learned feedback, auto-save state) | 200 | 400, 422 |
+| `POST /preferences/prompts/reset-feedback` | Stop dismissed suggestions influencing analyses | 200 | |
 | `DELETE /prompts/{id}` | Delete prompt and versions | 204 | 404 |
-| `POST /prompts/{id}/versions` | Append an immutable version | 201 | 403, 404, 409 |
+| `POST /prompts/{id}/versions` | Append an immutable version; `optimisation_id` links a library optimisation, `suggestion_ids` are marked applied | 201 | 403, 404, 409 |
 | `GET /prompts/{id}/export?format=txt|md|json&version=` | Download one version | 200 | 404 |
 | `GET /preferences` | Preference memory with provenance | 200 | |
 | `POST /preferences` | Create/upsert (`source` is assigned server-side) | 201 / 200 | 400 |

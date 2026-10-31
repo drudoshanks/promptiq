@@ -10,6 +10,8 @@ export interface PlanLimits {
   priceLabel: string;
   /** Optimisations per billing period. */
   optimisationsPerPeriod: number;
+  /** AI prompt analyses (suggestions) per billing period. */
+  analysesPerPeriod: number;
   /** Maximum prompt length in characters accepted by the optimiser. */
   maxPromptChars: number;
   /** Maximum saved prompts in the library. */
@@ -26,6 +28,7 @@ export const PLANS: Record<PlanCode, PlanLimits> = {
     name: "Free",
     priceLabel: "$0",
     optimisationsPerPeriod: 20,
+    analysesPerPeriod: 30,
     maxPromptChars: 4_000,
     maxSavedPrompts: 25,
     maxVersionsPerPrompt: 10,
@@ -36,6 +39,7 @@ export const PLANS: Record<PlanCode, PlanLimits> = {
     name: "Pro",
     priceLabel: "$12 / month",
     optimisationsPerPeriod: 500,
+    analysesPerPeriod: 1000,
     maxPromptChars: 20_000,
     maxSavedPrompts: 2_000,
     maxVersionsPerPrompt: 100,

@@ -97,6 +97,8 @@ const versionInput = z.object({
 
 export const createPromptSchema = z.object({
   title: z.string().max(120).optional(),
+  description: z.string().max(1000).nullable().optional(),
+  target_model: z.string().max(100).nullable().optional(),
   category: taskCategory.default("general"),
   tags: z.array(z.string().max(30)).max(10).optional(),
   versions: z.array(versionInput).min(1).max(3),
@@ -105,18 +107,36 @@ export const createPromptSchema = z.object({
 export const updatePromptSchema = z
   .object({
     title: z.string().min(1).max(120).optional(),
+    description: z.string().max(1000).nullable().optional(),
+    target_model: z.string().max(100).nullable().optional(),
+    is_favourite: z.boolean().optional(),
     category: taskCategory.optional(),
     tags: z.array(z.string().max(30)).max(10).optional(),
     archived: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "Provide at least one field." });
 
-export const createVersionSchema = versionInput;
+export const createVersionSchema = versionInput.extend({
+  /** Library optimisation that produced this text (links run → version). */
+  optimisation_id: uuid.nullable().optional(),
+  /** Suggestions incorporated in this text (marked applied). */
+  suggestion_ids: z.array(uuid).max(20).optional(),
+  provenance: z.enum(PROVENANCES).optional(),
+});
 
 export const listPromptsQuerySchema = z.object({
   search: z.string().max(200).optional(),
   category: taskCategory.optional(),
   tag: z.string().max(30).optional(),
+  target_model: z.string().max(100).optional(),
+  favourite: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => v === "true"),
+  optimisation: z.enum(["optimised", "not_optimised"]).optional(),
+  priority: z.enum(["attention", "high", "medium", "low"]).optional(),
+  sort: z.enum(["recent", "oldest", "most_used", "largest", "most_saved", "attention"]).default("recent"),
+  archived: z.enum(["include", "only"]).optional(),
   include_archived: z
     .enum(["true", "false"])
     .optional()
@@ -180,6 +200,63 @@ export const tokenEstimateRequestSchema = z
 export type TokenEstimateRequest = z.infer<typeof tokenEstimateRequestSchema>;
 
 export const usageRecordsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  page_size: z.coerce.number().int().min(1).max(100).default(25),
+});
+
+// ---------------------------------------------------------------------------
+// Prompt library: analysis, suggestions, optimisation, preferences
+// ---------------------------------------------------------------------------
+export const analyseRequestSchema = z
+  .object({
+    version_id: uuid.nullable().optional(),
+    /** Re-analyse even if this version already has a completed analysis. */
+    force: z.boolean().optional(),
+  })
+  .strict();
+
+export const suggestionStatusSchema = z.object({ status: z.enum(["pending", "accepted", "dismissed", "deferred"]) }).strict();
+
+export const suggestionsQuerySchema = z.object({
+  status: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.split(",").map((s) => s.trim()) : undefined))
+    .pipe(z.array(z.enum(["pending", "accepted", "dismissed", "deferred", "applied"])).optional()),
+  page: z.coerce.number().int().min(1).default(1),
+  page_size: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+export const libraryOptimiseSchema = z
+  .object({
+    version_id: uuid.nullable().optional(),
+    /** The user's edited revision (preview) to optimise instead of the stored text. */
+    text: z.string().max(HARD_MAX_PROMPT_CHARS).nullable().optional(),
+    mode: z.enum(["balanced", "token_saver", "quality_first", "custom"]).optional(),
+    custom_objective: z.string().max(500).nullable().optional(),
+    suggestion_ids: z.array(uuid).max(12).optional(),
+    target_model: z.string().max(100).nullable().optional(),
+    expected_output: z.lazy(() => expectedOutputSchema).optional(),
+  })
+  .strict();
+
+export const archiveSchema = z.object({ archived: z.boolean() }).strict();
+
+export const promptPreferencesSchema = z
+  .object({
+    preferred_model: z.string().max(100).nullable().optional(),
+    preferred_style: z.enum(["natural", "structured", "bullet_points", "step_by_step"]).nullable().optional(),
+    preferred_response_length: z.enum(["short", "medium", "long"]).nullable().optional(),
+    token_efficiency_priority: z.enum(["low", "balanced", "high"]).optional(),
+    default_optimisation_mode: z.enum(["balanced", "token_saver", "quality_first"]).optional(),
+    domains: z.array(z.string().max(40)).max(10).optional(),
+    learn_from_feedback: z.boolean().optional(),
+    background_analysis: z.boolean().optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: "Provide at least one preference." });
+
+export const historyQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   page_size: z.coerce.number().int().min(1).max(100).default(25),
 });
