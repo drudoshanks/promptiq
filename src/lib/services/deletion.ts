@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { AppError } from "@/lib/api/errors";
 import {
+  promptFeedbackEvents,
   appUsers,
   authUser,
   deletionJobs,
@@ -44,6 +45,7 @@ export async function requestAccountDeletion(db: Db, userId: string): Promise<De
       if (!user) throw new Error("User not found");
 
       await tx.delete(feedback).where(eq(feedback.userId, userId));
+      await tx.delete(promptFeedbackEvents).where(eq(promptFeedbackEvents.userId, userId));
       await tx.delete(tokenEstimates).where(eq(tokenEstimates.userId, userId));
       await tx.delete(prompts).where(eq(prompts.userId, userId)); // versions cascade
       await tx.delete(userPreferences).where(eq(userPreferences.userId, userId));

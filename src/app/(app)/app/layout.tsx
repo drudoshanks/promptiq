@@ -11,9 +11,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   if (!user) redirect("/sign-in?next=/app");
 
   return (
-    <div className="min-h-dvh">
+    <div className="min-h-dvh lg:flex">
       <AppNav email={user.email} isAdmin={user.isAdmin} />
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">{children}</main>
+      <main className="min-w-0 flex-1">
+        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">{children}</div>
+      </main>
     </div>
   );
 }

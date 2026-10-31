@@ -248,6 +248,8 @@ export interface RecordUsageInput {
   runId: string | null;
   /** Set instead of runId for prompt analyses. */
   analysisId?: string | null;
+  /** Set for operations that have neither a run nor a stored analysis. */
+  operationId?: string | null;
   attempt: number;
   provider: string;
   modelId: string;
@@ -284,6 +286,7 @@ export async function recordApiUsage(db: DbOrTx, input: RecordUsageInput, now = 
       userId: input.userId,
       runId: input.runId,
       analysisId: input.analysisId ?? null,
+      operationId: input.operationId ?? null,
       attempt: input.attempt,
       provider: input.provider,
       modelId: input.modelId,

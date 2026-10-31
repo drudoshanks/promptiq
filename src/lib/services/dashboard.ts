@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gte, isNull, isNotNull, sql } from "drizzle-orm";
 
-import { SUGGESTION_CATEGORY_LABELS, type SuggestionCategory } from "@/lib/analysis/schema";
+import { SUGGESTION_KIND_LABELS, toSuggestionKind } from "@/lib/intelligence/categories";
 import { DEFAULT_TARGET_MODEL } from "@/lib/config/models";
 import { calculateCost } from "@/lib/cost";
 import { apiUsageRecords, optimisationRuns, promptAnalyses, promptSuggestions, promptVersions, prompts } from "@/lib/db/schema";
@@ -150,7 +150,7 @@ async function computeAnalytics(db: DbOrTx, userId: string, now: Date) {
   const byCategory: Record<string, { label: string; accepted: number; dismissed: number; total: number }> = {};
   for (const r of suggestionRows) {
     byStatus[r.status] = (byStatus[r.status] ?? 0) + Number(r.n);
-    const c = (byCategory[r.category] ??= { label: SUGGESTION_CATEGORY_LABELS[r.category as SuggestionCategory] ?? r.category, accepted: 0, dismissed: 0, total: 0 });
+    const c = (byCategory[r.category] ??= { label: SUGGESTION_KIND_LABELS[toSuggestionKind(r.category)], accepted: 0, dismissed: 0, total: 0 });
     c.total += Number(r.n);
     if (r.status === "accepted" || r.status === "applied") c.accepted += Number(r.n);
     if (r.status === "dismissed") c.dismissed += Number(r.n);

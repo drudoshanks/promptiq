@@ -48,17 +48,20 @@ export default async function DashboardPage() {
             Your private prompt library. {user.historyEnabled ? "Auto-save is on: prompts you optimise are saved here." : "Auto-save is off: save prompts from the studio when you want to keep them."}
           </p>
         </div>
-        <LinkButton href="/app/studio" variant="primary">
-          Open the studio
-        </LinkButton>
+        <div className="flex flex-wrap gap-2">
+          <LinkButton href="/app/intelligence" variant="primary">
+            Improve a prompt
+          </LinkButton>
+          <LinkButton href="/app/studio">Quick studio</LinkButton>
+        </div>
       </section>
 
       {summary.total_prompts === 0 ? (
         <div className="panel-soft p-8 text-center">
-          <p className="text-ink-soft">Your library is empty. Optimise a prompt in the studio, or save one, and it will appear here with suggestions and token figures.</p>
+          <p className="text-ink-soft">Your library is empty. Improve a prompt and save the result, and it will appear here with suggestions and token figures.</p>
           <div className="mt-4">
-            <LinkButton href="/app/studio" variant="primary">
-              Optimise a prompt
+            <LinkButton href="/app/intelligence" variant="primary">
+              Improve a prompt
             </LinkButton>
           </div>
         </div>

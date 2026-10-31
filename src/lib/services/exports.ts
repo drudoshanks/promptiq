@@ -1,6 +1,6 @@
 import { asc, eq } from "drizzle-orm";
 
-import { feedback, promptAnalyses, prompts, promptSuggestions, promptVersions, userPreferences, type AppUser } from "@/lib/db/schema";
+import { feedback, promptAnalyses, promptFeedbackEvents, prompts, promptSuggestions, promptVersions, userPreferences, type AppUser } from "@/lib/db/schema";
 import type { DbOrTx } from "@/lib/db/types";
 
 import { serialiseAnalysis, serialiseSuggestion } from "./analysis";
@@ -55,8 +55,16 @@ export async function buildAccountExport(db: DbOrTx, user: AppUser) {
     })),
     feedback: feedbackRows.map(serialiseFeedback),
     prompt_preferences: serialisePromptPreferences(promptPrefs),
-    analyses: analysisRows.map(serialiseAnalysis),
+    analyses: analysisRows.map((a) => serialiseAnalysis(a)),
     suggestions: suggestionRows.map(serialiseSuggestion),
+    feedback_events: (await db.query.promptFeedbackEvents.findMany({ where: eq(promptFeedbackEvents.userId, user.id), orderBy: [asc(promptFeedbackEvents.createdAt)] })).map((e) => ({
+      event_type: e.eventType,
+      suggestion_category: e.suggestionCategory,
+      task_category: e.taskCategory,
+      optimisation_mode: e.optimisationMode,
+      prompt_id: e.promptId,
+      created_at: e.createdAt.toISOString(),
+    })),
   };
 }
 

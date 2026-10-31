@@ -13,6 +13,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",
     trace: "on-first-retry",
+    // Use an already-installed Chromium when the bundled revision is unavailable.
+    ...(process.env.PW_CHROMIUM_PATH ? { launchOptions: { executablePath: process.env.PW_CHROMIUM_PATH } } : {}),
   },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"] } },

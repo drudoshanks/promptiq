@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { PreferencesManager } from "@/components/preferences/preferences-manager";
 import { PromptPreferencesForm } from "@/components/preferences/prompt-preferences-form";
-import { SUGGESTION_CATEGORY_LABELS, type SuggestionCategory } from "@/lib/analysis/schema";
+import { SUGGESTION_KIND_LABELS, toSuggestionKind } from "@/lib/intelligence/categories";
 import { selectableModels } from "@/lib/config/models";
 import { getCurrentUser } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
@@ -33,7 +33,7 @@ export default async function PreferencesPage() {
           <PromptPreferencesForm
             initial={serialisePromptPreferences(promptPrefs)}
             models={selectableModels().map((m) => ({ id: m.id, label: m.label }))}
-            feedbackHistory={Object.entries(feedback).map(([category, c]) => ({ category, label: SUGGESTION_CATEGORY_LABELS[category as SuggestionCategory] ?? category, ...c }))}
+            feedbackHistory={Object.entries(feedback).map(([category, c]) => ({ category, label: SUGGESTION_KIND_LABELS[toSuggestionKind(category)], ...c }))}
           />
         </div>
       </section>

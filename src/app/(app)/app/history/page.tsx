@@ -31,7 +31,7 @@ export default async function HistoryPage({ searchParams }: { searchParams: Prom
       {history.items.length === 0 ? (
         <p className="panel-soft p-8 text-center text-ink-soft">No optimisations yet.</p>
       ) : (
-        <div className="panel overflow-x-auto">
+        <div className="panel relative overflow-x-auto">
           <table className="table">
             <thead>
               <tr>

@@ -239,13 +239,19 @@ export const optimisationRuns = pgTable(
     estimatedCostUsd: numeric("estimated_cost_usd", { precision: 12, scale: 6 }),
     pricingVersion: text("pricing_version"),
     attemptCount: integer("attempt_count").notNull().default(1),
-    optimisationMode: text("optimisation_mode", { enum: ["balanced", "token_saver", "quality_first", "custom"] }).notNull().default("balanced"),
+    optimisationMode: text("optimisation_mode", { enum: ["detailed", "balanced", "token_saver", "quality_first", "custom"] }).notNull().default("balanced"),
     targetModel: text("target_model"),
     tokensSaved: integer("tokens_saved"),
     reductionPercent: numeric("reduction_percent", { precision: 7, scale: 2 }),
     estimatedInputCostBefore: numeric("estimated_input_cost_before", { precision: 16, scale: 10 }),
     estimatedInputCostAfter: numeric("estimated_input_cost_after", { precision: 16, scale: 10 }),
     appliedSuggestionCount: integer("applied_suggestion_count").notNull().default(0),
+    intentCategory: text("intent_category"),
+    tokenBudget: integer("token_budget"),
+    preservationStatus: text("preservation_status", { enum: ["passed", "needs_review", "failed"] }),
+    preservationReport: jsonb("preservation_report").$type<Record<string, unknown>>(),
+    iterations: smallint("iterations"),
+    engine: text("engine", { enum: ["local", "model"] }),
     latencyMs: integer("latency_ms"),
     requestId: text("request_id"),
     errorCode: text("error_code"),
@@ -327,6 +333,8 @@ export const apiUsageRecords = pgTable(
       .references(() => appUsers.id, { onDelete: "cascade" }),
     runId: uuid("run_id").references(() => optimisationRuns.id, { onDelete: "set null" }),
     analysisId: uuid("analysis_id"),
+    /** Groups attempts of operations with no stored analysis or run (unsaved analyses, validation). */
+    operationId: uuid("operation_id"),
     attempt: integer("attempt").notNull().default(1),
     provider: text("provider").notNull(),
     modelId: text("model_id").notNull(),
@@ -379,6 +387,15 @@ export const promptAnalyses = pgTable(
     outputTokens: integer("output_tokens"),
     actualCost: numeric("actual_cost", { precision: 16, scale: 10 }),
     errorCode: text("error_code"),
+    taskCategory: text("task_category"),
+    secondaryCategory: text("secondary_category"),
+    classificationConfidence: numeric("classification_confidence", { precision: 4, scale: 3 }),
+    classificationMethod: text("classification_method", { enum: ["rules", "model", "user"] }),
+    dimensionScores: jsonb("dimension_scores").$type<unknown[]>().notNull().default([]),
+    missingInformation: jsonb("missing_information").$type<unknown[]>().notNull().default([]),
+    requirementChecklist: jsonb("requirement_checklist").$type<unknown[]>().notNull().default([]),
+    rubricVersion: text("rubric_version"),
+    modelUsed: boolean("model_used").notNull().default(false),
     createdAt: tz("created_at").notNull().defaultNow(),
     completedAt: tz("completed_at"),
   },
@@ -418,6 +435,11 @@ export const promptSuggestions = pgTable(
     contextQuestion: text("context_question"),
     status: text("status", { enum: SUGGESTION_STATUSES }).notNull().default("pending"),
     appliedVersionId: uuid("applied_version_id"),
+    expectedBenefit: text("expected_benefit"),
+    tokenImpact: integer("token_impact"),
+    source: text("source", { enum: ["rules", "model"] }).notNull().default("model"),
+    recommendationScore: numeric("recommendation_score", { precision: 5, scale: 3 }),
+    ranking: jsonb("ranking").$type<Record<string, unknown>>().notNull().default({}),
     feedbackAt: tz("feedback_at"),
     createdAt: tz("created_at").notNull().defaultNow(),
   },
@@ -428,7 +450,7 @@ export const promptSuggestions = pgTable(
   ],
 );
 
-export const OPTIMISATION_MODES = ["balanced", "token_saver", "quality_first", "custom"] as const;
+export const OPTIMISATION_MODES = ["detailed", "balanced", "token_saver", "quality_first", "custom"] as const;
 export type OptimisationMode = (typeof OPTIMISATION_MODES)[number];
 
 export const userPromptPreferences = pgTable("user_prompt_preferences", {
@@ -439,13 +461,50 @@ export const userPromptPreferences = pgTable("user_prompt_preferences", {
   preferredStyle: text("preferred_style", { enum: ["natural", "structured", "bullet_points", "step_by_step"] }),
   preferredResponseLength: text("preferred_response_length", { enum: ["short", "medium", "long"] }),
   tokenEfficiencyPriority: text("token_efficiency_priority", { enum: ["low", "balanced", "high"] }).notNull().default("balanced"),
-  defaultOptimisationMode: text("default_optimisation_mode", { enum: ["balanced", "token_saver", "quality_first"] }).notNull().default("balanced"),
+  defaultOptimisationMode: text("default_optimisation_mode", { enum: ["detailed", "balanced", "token_saver", "quality_first"] }).notNull().default("balanced"),
+  promptStyle: text("prompt_style", { enum: ["minimal", "balanced", "comprehensive"] }),
+  taskCategories: text("task_categories").array().notNull().default(sql`'{}'::text[]`),
+  helpfulSuggestionCategories: text("helpful_suggestion_categories").array().notNull().default(sql`'{}'::text[]`),
   domains: text("domains").array().notNull().default(sql`'{}'::text[]`),
   learnFromFeedback: boolean("learn_from_feedback").notNull().default(true),
   backgroundAnalysis: boolean("background_analysis").notNull().default(false),
   preferencesJson: jsonb("preferences_json").$type<Record<string, unknown>>().notNull().default({}),
   updatedAt: tz("updated_at").notNull().defaultNow(),
 });
+
+export const FEEDBACK_EVENT_TYPES = [
+  "suggestion_accepted",
+  "suggestion_dismissed",
+  "suggestion_deferred",
+  "mode_selected",
+  "revision_saved",
+  "version_restored",
+  "rated_helpful",
+  "rated_unhelpful",
+] as const;
+export type FeedbackEventType = (typeof FEEDBACK_EVENT_TYPES)[number];
+
+/** Explicit interactions that drive suggestion ranking (migration 0005). No prompt text. */
+export const promptFeedbackEvents = pgTable(
+  "prompt_feedback_events",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    promptId: uuid("prompt_id").references(() => prompts.id, { onDelete: "set null" }),
+    promptVersionId: uuid("prompt_version_id").references(() => promptVersions.id, { onDelete: "set null" }),
+    suggestionId: uuid("suggestion_id").references(() => promptSuggestions.id, { onDelete: "set null" }),
+    runId: uuid("run_id").references(() => optimisationRuns.id, { onDelete: "set null" }),
+    eventType: text("event_type", { enum: FEEDBACK_EVENT_TYPES }).notNull(),
+    suggestionCategory: text("suggestion_category"),
+    taskCategory: text("task_category"),
+    optimisationMode: text("optimisation_mode"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("idx_feedback_events_user_created").on(t.userId, t.createdAt), index("idx_feedback_events_user_category").on(t.userId, t.suggestionCategory, t.taskCategory)],
+);
+export type PromptFeedbackEvent = typeof promptFeedbackEvents.$inferSelect;
 
 export const feedback = pgTable(
   "feedback",

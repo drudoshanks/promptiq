@@ -1,6 +1,8 @@
 import type { TaskCategory } from "@/lib/categories";
 import type { UsageRecordStatus } from "@/lib/db/schema";
-import type { AnalysisOutput } from "@/lib/analysis/schema";
+import type { GenerationMode, SuggestionKind } from "@/lib/intelligence/categories";
+import type { ModelAnalysis, ModelComparison, ModelRevision, IntentRepresentation } from "@/lib/intelligence/schemas";
+import type { PromptTemplate } from "@/lib/intelligence/templates";
 import type { OptimiserMode } from "@/lib/optimiser/instructions";
 import type { OptimisationOutput } from "@/lib/optimiser/schema";
 
@@ -24,12 +26,36 @@ export interface OptimiseRequest {
   acceptedSuggestions?: string[];
 }
 
-/** One prompt to review; never the user's whole library (§5, §12). */
-export interface AnalyseRequest {
+/** One prompt to analyse; never the user's whole library (§11). */
+export interface IntentAnalysisRequest {
   prompt: string;
   targetModel: string | null;
-  preferences: Record<string, string | string[] | null>;
-  feedbackHistory: Record<string, { accepted: number; dismissed: number }>;
+  /** Only user-approved preference fields. */
+  preferences: Record<string, unknown>;
+  requestId: string;
+  userKey: string;
+}
+
+export interface RevisionRequest {
+  prompt: string;
+  mode: GenerationMode;
+  intent: IntentRepresentation;
+  template: PromptTemplate;
+  acceptedChanges: string[];
+  acceptedKinds: SuggestionKind[];
+  customObjective: string | null;
+  tokenBudget: number | null;
+  /** Requirements a previous draft dropped, to put back. */
+  restore: string[];
+  preferences: Record<string, unknown>;
+  questions: Array<{ key: string; question: string }>;
+  requestId: string;
+  userKey: string;
+}
+
+export interface ComparisonRequest {
+  items: Array<{ id: string; text: string }>;
+  revised: string;
   requestId: string;
   userKey: string;
 }
@@ -71,8 +97,8 @@ export type OptimiseResult =
   | (ResultBase & { kind: "incomplete"; reason: string })
   | (ResultBase & { kind: "invalid_output"; reason: string });
 
-export type AnalyseResult =
-  | (ResultBase & { kind: "ok"; output: AnalysisOutput })
+export type StructuredResult<T> =
+  | (ResultBase & { kind: "ok"; output: T })
   | (ResultBase & { kind: "refused"; reason: string })
   | (ResultBase & { kind: "incomplete"; reason: string })
   | (ResultBase & { kind: "invalid_output"; reason: string });
@@ -83,13 +109,16 @@ export interface OptimiserProvider {
   optimise(request: OptimiseRequest): Promise<OptimiseResult>;
 }
 
-export interface PromptAnalyser {
+/** Model-assisted operations of the Prompt Intelligence Engine (§11). */
+export interface IntelligenceProvider {
   readonly name: "openai" | "mock";
   readonly modelId: string;
-  analyse(request: AnalyseRequest): Promise<AnalyseResult>;
+  analyseIntent(request: IntentAnalysisRequest): Promise<StructuredResult<ModelAnalysis>>;
+  revisePrompt(request: RevisionRequest): Promise<StructuredResult<ModelRevision>>;
+  compareRequirements(request: ComparisonRequest): Promise<StructuredResult<ModelComparison>>;
 }
 
-export type AiProvider = OptimiserProvider & PromptAnalyser;
+export type AiProvider = OptimiserProvider & IntelligenceProvider;
 
 export type ProviderErrorCode = "PROVIDER_TIMEOUT" | "PROVIDER_UNAVAILABLE";
 

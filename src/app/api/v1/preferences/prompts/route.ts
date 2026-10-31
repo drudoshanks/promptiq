@@ -26,6 +26,9 @@ export const PATCH = withApi({ auth: "required", rateLimit: "userPerMinute" }, a
     domains: body.domains,
     learnFromFeedback: body.learn_from_feedback,
     backgroundAnalysis: body.background_analysis,
+    promptStyle: body.prompt_style,
+    taskCategories: body.task_categories,
+    helpfulSuggestionCategories: body.helpful_suggestion_categories,
   });
   return ok({ ...serialisePromptPreferences(prefs), auto_save_enabled: user.historyEnabled });
 });

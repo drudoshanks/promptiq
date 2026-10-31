@@ -3,8 +3,26 @@ import { zodTextFormat } from "openai/helpers/zod";
 
 import { findSupportedModel } from "@/lib/config/models";
 import { logger } from "@/lib/logger";
-import { ANALYSIS_TEMPLATE_VERSION, buildAnalysisInstructions, buildAnalysisPayload } from "@/lib/analysis/instructions";
-import { analysisOutputSchema, validateAnalysisOutput } from "@/lib/analysis/schema";
+import {
+  buildAnalysisInstructions,
+  buildAnalysisPayload,
+  buildComparisonInstructions,
+  buildComparisonPayload,
+  buildRevisionInstructions,
+  buildRevisionPayload,
+  INTELLIGENCE_TEMPLATE_VERSION,
+} from "@/lib/intelligence/instructions";
+import {
+  modelAnalysisSchema,
+  modelComparisonSchema,
+  modelRevisionSchema,
+  validateModelAnalysis,
+  validateModelComparison,
+  validateModelRevision,
+  type ModelAnalysis,
+  type ModelComparison,
+  type ModelRevision,
+} from "@/lib/intelligence/schemas";
 import { buildStableInstructions, buildUserPayload, TEMPLATE_VERSION } from "@/lib/optimiser/instructions";
 import { optimisationOutputSchema, validateOptimisationOutput } from "@/lib/optimiser/schema";
 
@@ -12,11 +30,13 @@ import { CircuitBreaker } from "./circuit-breaker";
 import {
   ProviderError,
   type AiProvider,
-  type AnalyseRequest,
-  type AnalyseResult,
+  type ComparisonRequest,
+  type IntentAnalysisRequest,
   type OptimiseRequest,
   type OptimiseResult,
   type ProviderAttempt,
+  type RevisionRequest,
+  type StructuredResult,
 } from "./types";
 import { parseResponsesUsage } from "./usage";
 
@@ -55,7 +75,11 @@ export class OpenAIOptimiserProvider implements AiProvider {
   private readonly instructions = buildStableInstructions();
   private readonly format = zodTextFormat(optimisationOutputSchema, "prompt_optimisation");
   private readonly analysisInstructions = buildAnalysisInstructions();
-  private readonly analysisFormat = zodTextFormat(analysisOutputSchema, "prompt_analysis");
+  private readonly analysisFormat = zodTextFormat(modelAnalysisSchema, "prompt_analysis");
+  private readonly revisionInstructions = buildRevisionInstructions();
+  private readonly revisionFormat = zodTextFormat(modelRevisionSchema, "prompt_revision");
+  private readonly comparisonInstructions = buildComparisonInstructions();
+  private readonly comparisonFormat = zodTextFormat(modelComparisonSchema, "requirement_comparison");
   private readonly breaker: CircuitBreaker;
   private readonly reasoningEffort: ReasoningEffort | undefined;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -88,16 +112,42 @@ export class OpenAIOptimiserProvider implements AiProvider {
     });
   }
 
-  analyse(request: AnalyseRequest): Promise<AnalyseResult> {
+  analyseIntent(request: IntentAnalysisRequest): Promise<StructuredResult<ModelAnalysis>> {
     return this.callStructured({
       requestId: request.requestId,
       userKey: request.userKey,
       instructions: this.analysisInstructions,
       input: buildAnalysisPayload(request),
       format: this.analysisFormat,
-      cacheKey: ANALYSIS_TEMPLATE_VERSION,
-      maxOutputTokens: 2000,
-      validate: validateAnalysisOutput,
+      cacheKey: `${INTELLIGENCE_TEMPLATE_VERSION}:analyse`,
+      maxOutputTokens: 2500,
+      validate: validateModelAnalysis,
+    });
+  }
+
+  revisePrompt(request: RevisionRequest): Promise<StructuredResult<ModelRevision>> {
+    return this.callStructured({
+      requestId: request.requestId,
+      userKey: request.userKey,
+      instructions: this.revisionInstructions,
+      input: buildRevisionPayload(request),
+      format: this.revisionFormat,
+      cacheKey: `${INTELLIGENCE_TEMPLATE_VERSION}:revise`,
+      maxOutputTokens: 4000,
+      validate: validateModelRevision,
+    });
+  }
+
+  compareRequirements(request: ComparisonRequest): Promise<StructuredResult<ModelComparison>> {
+    return this.callStructured({
+      requestId: request.requestId,
+      userKey: request.userKey,
+      instructions: this.comparisonInstructions,
+      input: buildComparisonPayload(request.items, request.revised),
+      format: this.comparisonFormat,
+      cacheKey: `${INTELLIGENCE_TEMPLATE_VERSION}:compare`,
+      maxOutputTokens: 1500,
+      validate: validateModelComparison,
     });
   }
 

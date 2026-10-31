@@ -148,7 +148,7 @@ export function PreferencesManager({ initial, personalisationEnabled }: Preferen
         {items.length === 0 ? (
           <p className="panel-soft mt-3 p-6 text-center text-ink-soft">No preferences yet. PromptIQ never adds them on its own.</p>
         ) : (
-          <div className="mt-3 overflow-x-auto">
+          <div className="relative mt-3 overflow-x-auto">
             <table className="table">
               <thead>
                 <tr>
