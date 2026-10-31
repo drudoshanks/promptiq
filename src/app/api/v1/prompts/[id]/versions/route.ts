@@ -1,6 +1,7 @@
 import { created, ok, parseJson, withApi } from "@/lib/api/handler";
 import { createVersionSchema, idParamSchema } from "@/lib/api/validation";
 import { db } from "@/lib/db/client";
+import { recordRevisionSaved } from "@/lib/services/intelligence";
 import { saveLibraryVersion } from "@/lib/services/library";
 import { getPrompt, serialiseVersion } from "@/lib/services/prompts";
 
@@ -27,5 +28,8 @@ export const POST = withApi<"required", { id: string }>({ auth: "required", rate
     optimisationId: body.optimisation_id,
     suggestionIds: body.suggestion_ids,
   });
+  if (body.optimisation_id || body.suggestion_ids?.length) {
+    await recordRevisionSaved(db, user.id, { promptId: id, versionId: version.id, runId: body.optimisation_id ?? null });
+  }
   return created(serialiseVersion(version));
 });

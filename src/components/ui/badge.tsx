@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { cx } from "@/lib/utils";
 
 interface BadgeProps {
-  tone?: "neutral" | "estimate" | "accent" | "danger";
+  tone?: "neutral" | "estimate" | "accent" | "danger" | "warn";
   children: ReactNode;
   title?: string;
   className?: string;

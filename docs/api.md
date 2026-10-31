@@ -188,3 +188,14 @@ returns `original`, `optimised` (each a count as above), `tokens_saved`
 - Errors: `422 UNSUPPORTED_MODEL` for models outside the allowlist,
   `413 PROMPT_TOO_LONG` above 120,000 characters, `429 RATE_LIMITED` above
   120 requests per minute per user.
+
+
+## Prompt intelligence
+
+`POST /prompt-intelligence/analyse`, `/generate`, `/optimise`, `/validate` and
+`/feedback`. Request and response fields, defaults, quotas and error codes are
+documented in [`prompt-intelligence.md`](prompt-intelligence.md#api).
+`POST /prompts/{id}/analyse` now runs the same engine and accepts `category`; its
+response adds `classification`, `score.dimensions`, `missing_information`,
+`requirements` (text read from the analysed version via stored offsets) and
+`is_current`.

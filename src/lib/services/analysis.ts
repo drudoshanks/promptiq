@@ -1,8 +1,7 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
-import { ANALYSIS_TEMPLATE_VERSION } from "@/lib/analysis/instructions";
-import { SUGGESTION_CATEGORY_LABELS, type SuggestionCategory } from "@/lib/analysis/schema";
 import { AppError, notFound } from "@/lib/api/errors";
+import { RUBRIC_WEIGHTS } from "@/lib/config/intelligence";
 import { DEFAULT_TARGET_MODEL } from "@/lib/config/models";
 import { planFor } from "@/lib/config/plans";
 import {
@@ -15,19 +14,26 @@ import {
   type SuggestionStatus,
 } from "@/lib/db/schema";
 import type { Db, DbOrTx } from "@/lib/db/types";
+import { isIntentCategory, SUGGESTION_KIND_LABELS, toSuggestionKind, type IntentCategory } from "@/lib/intelligence/categories";
+import { analyseText, AttemptLog, EngineProviderError, type AnalysisResult } from "@/lib/intelligence/engine";
+import { INTELLIGENCE_TEMPLATE_VERSION } from "@/lib/intelligence/instructions";
 import type { RequestLogger } from "@/lib/logger";
 import { userKeyFor } from "@/lib/optimiser/service";
-import { ProviderError, type PromptAnalyser, type ProviderAttempt } from "@/lib/providers/types";
+import { ProviderError, type IntelligenceProvider, type ProviderAttempt } from "@/lib/providers/types";
 
 import { recordApiUsage, summariseUsage } from "./estimates";
-import { getFeedbackHistory, getPromptPreferences } from "./prompt-preferences";
+import { recordFeedbackEvent, STATUS_EVENT } from "./feedback-events";
+import { getPromptPreferences, getRankingContext, preferencesForModel } from "./prompt-preferences";
 import { getPrompt, refreshPromptStats } from "./prompts";
 import { assertAnalysisQuotaAvailable, globalSpendTodayUsd, recordAnalysisUsage } from "./usage";
+
+/** Identifies the rubric weights an analysis was scored with. */
+export const RUBRIC_VERSION = `rubric-v1:${Object.values(RUBRIC_WEIGHTS).join("-")}`;
 
 export interface AnalyseContext {
   db: Db;
   user: AppUser;
-  provider: PromptAnalyser;
+  provider: IntelligenceProvider;
   requestId: string;
   log: RequestLogger;
   globalDailySpendCapUsd: number;
@@ -39,6 +45,8 @@ export interface AnalysePromptInput {
   versionId?: string | null;
   /** Re-run even when this version already has a completed analysis. */
   force?: boolean;
+  /** The user's manual task category. */
+  category?: IntentCategory | null;
 }
 
 export interface AnalysisWithSuggestions {
@@ -46,17 +54,34 @@ export interface AnalysisWithSuggestions {
   suggestions: PromptSuggestion[];
   /** True when an existing analysis of the same version was returned (no new AI call). */
   reused: boolean;
+  /** Full engine output when this call ran the analysis (not stored verbatim). */
+  engine?: AnalysisResult;
 }
 
 async function loadSuggestions(db: DbOrTx, analysisId: string): Promise<PromptSuggestion[]> {
   return db.query.promptSuggestions.findMany({ where: eq(promptSuggestions.analysisId, analysisId), orderBy: [asc(promptSuggestions.position)] });
 }
 
+/** Map engine/provider failures to safe API errors. */
+export function providerFailure(error: unknown): { code: string; attempts: ProviderAttempt[]; appError: AppError } {
+  if (error instanceof ProviderError) {
+    return { code: `${error.code}:${error.reason}`, attempts: error.attempts, appError: new AppError(error.code, "The AI service is temporarily unavailable. Nothing was changed — please try again shortly.", error.retryAfterSeconds ? { headers: { "Retry-After": String(error.retryAfterSeconds) } } : {}) };
+  }
+  if (error instanceof EngineProviderError) {
+    return {
+      code: error.kind === "refused" ? "ANALYSIS_REFUSED" : "INVALID_MODEL_OUTPUT",
+      attempts: error.attempts,
+      appError: error.kind === "refused" ? new AppError("OPTIMISATION_REFUSED", "The model declined to process this prompt. Nothing was changed.") : new AppError("INVALID_MODEL_OUTPUT", "The model returned an unexpected result. Please try again."),
+    };
+  }
+  throw error;
+}
+
 /**
- * Analyse one saved prompt version and store suggestions linked to that
- * version (Prompt Library §5–6). Only that version's text is sent to the
- * provider. Re-analysing an unchanged version reuses the stored result unless
- * `force` is set, so the same work is never paid for twice by accident.
+ * Analyse one saved prompt version with the Prompt Intelligence Engine and
+ * store the result linked to that exact version. Only that version's text is
+ * sent to the provider. Re-analysing an unchanged version reuses the stored
+ * result unless `force` is set or the user changes the category.
  */
 export async function analysePrompt(ctx: AnalyseContext, input: AnalysePromptInput): Promise<AnalysisWithSuggestions> {
   const { db, user, provider, log } = ctx;
@@ -71,7 +96,8 @@ export async function analysePrompt(ctx: AnalyseContext, input: AnalysePromptInp
   if (existing?.status === "running") {
     throw new AppError("CONFLICT", "An analysis of this version is already running.", { details: { analysis_id: existing.id } });
   }
-  if (existing && !input.force) {
+  const categoryChanged = Boolean(input.category && existing && existing.taskCategory !== input.category);
+  if (existing && !input.force && !categoryChanged) {
     return { analysis: existing, suggestions: await loadSuggestions(db, existing.id), reused: true };
   }
 
@@ -83,7 +109,8 @@ export async function analysePrompt(ctx: AnalyseContext, input: AnalysePromptInp
     throw new AppError("SPEND_CAP_REACHED", "Analysis is temporarily paused. Please try again later.");
   }
 
-  const targetModel = prompt.targetModel ?? DEFAULT_TARGET_MODEL;
+  const prefs = await getPromptPreferences(db, user.id);
+  const targetModel = prompt.targetModel ?? prefs.preferredModel ?? DEFAULT_TARGET_MODEL;
   let analysis: PromptAnalysis;
   try {
     const [row] = await db
@@ -95,7 +122,8 @@ export async function analysePrompt(ctx: AnalyseContext, input: AnalysePromptInp
         status: "running",
         targetModel,
         modelId: provider.modelId,
-        templateVersion: ANALYSIS_TEMPLATE_VERSION,
+        templateVersion: INTELLIGENCE_TEMPLATE_VERSION,
+        rubricVersion: RUBRIC_VERSION,
       })
       .returning();
     if (!row) throw new Error("Failed to start analysis");
@@ -107,9 +135,6 @@ export async function analysePrompt(ctx: AnalyseContext, input: AnalysePromptInp
     }
     throw error;
   }
-
-  const prefs = await getPromptPreferences(db, user.id);
-  const feedbackHistory = prefs.learnFromFeedback ? await getFeedbackHistory(db, user.id) : {};
 
   const recordAttempts = async (attempts: ProviderAttempt[]) => {
     const rows = [];
@@ -133,66 +158,64 @@ export async function analysePrompt(ctx: AnalyseContext, input: AnalysePromptInp
     }
     return summariseUsage(rows);
   };
-  const fail = async (attempts: ProviderAttempt[], code: string) => {
-    const usage = await recordAttempts(attempts);
-    await db
-      .update(promptAnalyses)
-      .set({
-        status: "failed",
-        errorCode: code,
-        completedAt: new Date(),
-        inputTokens: usage.total_input_tokens,
-        outputTokens: usage.total_output_tokens,
-        actualCost: usage.actual_cost === null ? null : usage.actual_cost.toFixed(10),
-      })
-      .where(eq(promptAnalyses.id, analysis.id));
-  };
 
-  let result;
+  const ranking = await getRankingContext(db, user.id, input.category ?? null);
+  const attemptLog = new AttemptLog();
+  let result: AnalysisResult;
   try {
-    result = await provider.analyse({
-      prompt: version.promptText,
+    result = await analyseText({
+      text: version.promptText,
+      categoryOverride: input.category ?? null,
       targetModel,
-      preferences: {
-        preferred_style: prefs.preferredStyle,
-        preferred_response_length: prefs.preferredResponseLength,
-        token_efficiency_priority: prefs.tokenEfficiencyPriority,
-        domains: prefs.domains,
-      },
-      feedbackHistory,
+      provider,
+      ranking,
+      preferences: preferencesForModel(prefs),
       requestId: ctx.requestId,
       userKey: userKeyFor(user.id),
+      versionKey: version.id,
+      log: attemptLog,
     });
   } catch (error) {
-    const code = error instanceof ProviderError ? error.code : "PROVIDER_UNAVAILABLE";
-    await fail(error instanceof ProviderError ? error.attempts : [], `${code}:${error instanceof ProviderError ? error.reason : "unknown"}`);
-    log.warn("analysis failed", { code, analysis_id: analysis.id });
-    throw new AppError(code, "The analysis service is temporarily unavailable. Please try again shortly.");
-  }
-
-  if (result.kind !== "ok") {
-    await fail(result.attempts, result.kind === "refused" ? "ANALYSIS_REFUSED" : "INVALID_MODEL_OUTPUT");
-    log.warn("analysis did not complete", { kind: result.kind, analysis_id: analysis.id });
-    throw result.kind === "refused"
-      ? new AppError("OPTIMISATION_REFUSED", "The reviewer declined to analyse this prompt.")
-      : new AppError("INVALID_MODEL_OUTPUT", "The reviewer returned an unexpected result. Please try again.");
+    const failure = providerFailure(error);
+    const usage = await recordAttempts(failure.attempts.length ? failure.attempts : attemptLog.attempts);
+    await db
+      .update(promptAnalyses)
+      .set({ status: "failed", errorCode: failure.code, completedAt: new Date(), inputTokens: usage.total_input_tokens, outputTokens: usage.total_output_tokens, actualCost: usage.actual_cost === null ? null : usage.actual_cost.toFixed(10) })
+      .where(eq(promptAnalyses.id, analysis.id));
+    log.warn("analysis failed", { code: failure.code, analysis_id: analysis.id });
+    throw failure.appError;
   }
 
   const usage = await recordAttempts(result.attempts);
-  const output = result.output;
+  const c = result.classification;
   const completed = await db.transaction(async (tx) => {
     const [row] = await tx
       .update(promptAnalyses)
       .set({
         status: "completed",
-        qualityScore: output.overall_quality_score,
-        alreadyOptimised: output.already_well_optimised,
+        qualityScore: result.score.overall,
+        alreadyOptimised: result.already_well_optimised,
         analysisResult: {
-          summary: output.summary,
-          recommended_actions: output.recommended_actions,
-          score_note: "Heuristic indicator of clarity and completeness, not an objective quality measure.",
+          summary: summarise(result),
+          objective: c.objective,
+          explanation: result.score.explanation,
+          priorities: result.score.priorities,
+          missing_elements: result.score.missing_elements,
+          sufficiently_clear: result.score.sufficiently_clear,
+          needs_more_context: result.score.needs_more_context,
+          template: result.template,
+          score_note: result.score.note,
+          recommended_actions: result.suggestions.slice(0, 3).map((s) => s.title),
         },
-        modelId: result.modelId,
+        taskCategory: c.primary,
+        secondaryCategory: c.secondary,
+        classificationConfidence: c.confidence.toFixed(3),
+        classificationMethod: c.method,
+        dimensionScores: result.score.dimensions,
+        missingInformation: c.missing_information,
+        requirementChecklist: result.requirements.map((r) => ({ id: r.id, kind: r.kind, start: r.start, end: r.end, essential: r.essential })),
+        modelUsed: result.model_used,
+        modelId: result.attempts[result.attempts.length - 1]?.modelId ?? provider.modelId,
         completedAt: new Date(),
         inputTokens: usage.total_input_tokens,
         outputTokens: usage.total_output_tokens,
@@ -200,9 +223,9 @@ export async function analysePrompt(ctx: AnalyseContext, input: AnalysePromptInp
       })
       .where(eq(promptAnalyses.id, analysis.id))
       .returning();
-    if (output.suggestions.length) {
+    if (result.suggestions.length) {
       await tx.insert(promptSuggestions).values(
-        output.suggestions.map((s, i) => ({
+        result.suggestions.map((s, i) => ({
           userId: user.id,
           analysisId: analysis.id,
           promptId: prompt.id,
@@ -212,11 +235,16 @@ export async function analysePrompt(ctx: AnalyseContext, input: AnalysePromptInp
           priority: s.priority,
           title: s.title,
           explanation: s.explanation,
-          recommendation: s.recommendation,
-          estimatedTokenImpact: s.estimated_token_impact,
+          recommendation: s.recommended_change,
+          expectedBenefit: s.expected_benefit,
+          tokenImpact: s.estimated_token_impact,
+          estimatedTokenImpact: impactBucket(s.estimated_token_impact, s.token_direction),
           tokenDirection: s.token_direction,
-          requiresUserContext: s.requires_user_context,
-          contextQuestion: s.context_question,
+          requiresUserContext: s.requires_clarification,
+          contextQuestion: s.clarification_question,
+          source: s.source,
+          recommendationScore: s.ranking.score.toFixed(3),
+          ranking: { ...s.ranking },
         })),
       );
     }
@@ -225,8 +253,20 @@ export async function analysePrompt(ctx: AnalyseContext, input: AnalysePromptInp
     return row ?? analysis;
   });
 
-  log.info("analysis completed", { analysis_id: analysis.id, suggestions: output.suggestions.length, score: output.overall_quality_score });
-  return { analysis: completed, suggestions: await loadSuggestions(db, analysis.id), reused: false };
+  log.info("analysis completed", { analysis_id: analysis.id, suggestions: result.suggestions.length, score: result.score.overall, category: c.primary, model_used: result.model_used });
+  return { analysis: completed, suggestions: await loadSuggestions(db, analysis.id), reused: false, engine: result };
+}
+
+export function summarise(result: AnalysisResult): string {
+  if (result.already_well_optimised) return "Already well optimised: the goal, requirements and expected output are clear. No changes needed.";
+  const n = result.suggestions.length;
+  return `${n} improvement${n === 1 ? "" : "s"} suggested. ${result.score.explanation}`;
+}
+
+function impactBucket(tokens: number | null, direction: string): "none" | "low" | "medium" | "high" {
+  if (tokens === null) return direction === "neutral" ? "none" : "low";
+  const t = Math.abs(tokens);
+  return t === 0 ? "none" : t < 10 ? "low" : t < 40 ? "medium" : "high";
 }
 
 /** Latest completed analysis for a prompt (any version), with its suggestions. */
@@ -281,6 +321,11 @@ export async function setSuggestionStatus(db: DbOrTx, userId: string, suggestion
     .where(and(eq(promptSuggestions.id, suggestionId), eq(promptSuggestions.userId, userId)))
     .returning();
   if (!updated) throw notFound("Suggestion");
+  const eventType = STATUS_EVENT[status];
+  if (eventType && existing.status !== status) {
+    const analysis = await db.query.promptAnalyses.findFirst({ where: eq(promptAnalyses.id, existing.analysisId), columns: { taskCategory: true } });
+    await recordFeedbackEvent(db, { userId, eventType, promptId: existing.promptId, promptVersionId: existing.promptVersionId, suggestionId: existing.id, suggestionCategory: toSuggestionKind(existing.category), taskCategory: analysis?.taskCategory ?? null });
+  }
   await refreshPromptStats(db, existing.promptId);
   return updated;
 }
@@ -295,18 +340,58 @@ export async function getOwnedSuggestions(db: DbOrTx, userId: string, promptId: 
   return ids.map((id) => rows.find((r) => r.id === id) as PromptSuggestion);
 }
 
-export function serialiseAnalysis(a: PromptAnalysis) {
-  const result = a.analysisResult as { summary?: string; recommended_actions?: string[]; score_note?: string };
+export function serialiseAnalysis(a: PromptAnalysis, opts: { versionText?: string; currentVersionId?: string | null } = {}) {
+  const result = a.analysisResult as {
+    summary?: string;
+    recommended_actions?: string[];
+    score_note?: string;
+    objective?: string;
+    explanation?: string;
+    priorities?: unknown[];
+    missing_elements?: string[];
+    sufficiently_clear?: boolean;
+    needs_more_context?: boolean;
+    template?: { id: string; label: string; version: number };
+  };
+  const checklist = (a.requirementChecklist ?? []) as Array<{ id: string; kind: string; start: number; end: number; essential: boolean }>;
+  const task = a.taskCategory && isIntentCategory(a.taskCategory) ? a.taskCategory : null;
   return {
     id: a.id,
     prompt_id: a.promptId,
     prompt_version_id: a.promptVersionId,
+    /** False once the prompt has a newer version: the analysis is historical. */
+    is_current: opts.currentVersionId === undefined ? null : opts.currentVersionId === a.promptVersionId,
     analysis_status: a.status,
     overall_quality_score: a.qualityScore,
     score_note: result.score_note ?? "Heuristic indicator, not an objective measure.",
     already_well_optimised: a.alreadyOptimised,
     summary: result.summary ?? null,
     recommended_actions: result.recommended_actions ?? [],
+    classification: task
+      ? {
+          primary: task,
+          secondary: a.secondaryCategory,
+          objective: result.objective ?? null,
+          confidence: a.classificationConfidence === null ? null : Number(a.classificationConfidence),
+          method: a.classificationMethod,
+          template: result.template ?? null,
+        }
+      : null,
+    score: {
+      overall: a.qualityScore,
+      dimensions: a.dimensionScores ?? [],
+      priorities: result.priorities ?? [],
+      missing_elements: result.missing_elements ?? [],
+      sufficiently_clear: result.sufficiently_clear ?? null,
+      needs_more_context: result.needs_more_context ?? null,
+      explanation: result.explanation ?? null,
+    },
+    missing_information: a.missingInformation ?? [],
+    requirements: opts.versionText
+      ? checklist.map((r) => ({ id: r.id, kind: r.kind, essential: r.essential, text: opts.versionText!.slice(r.start, r.end) }))
+      : checklist.map((r) => ({ id: r.id, kind: r.kind, essential: r.essential, text: null })),
+    rubric_version: a.rubricVersion,
+    model_used: a.modelUsed,
     target_model: a.targetModel,
     model_id: a.modelId,
     template_version: a.templateVersion,
@@ -318,21 +403,30 @@ export function serialiseAnalysis(a: PromptAnalysis) {
 }
 
 export function serialiseSuggestion(s: PromptSuggestion) {
+  const kind = toSuggestionKind(s.category);
   return {
     id: s.id,
     analysis_id: s.analysisId,
     prompt_id: s.promptId,
     prompt_version_id: s.promptVersionId,
-    category: s.category,
-    category_label: SUGGESTION_CATEGORY_LABELS[s.category as SuggestionCategory] ?? s.category,
+    category: kind,
+    category_label: SUGGESTION_KIND_LABELS[kind],
     priority: s.priority,
     title: s.title,
     explanation: s.explanation,
     recommendation: s.recommendation,
+    recommended_change: s.recommendation,
+    expected_benefit: s.expectedBenefit,
     estimated_token_impact: s.estimatedTokenImpact,
+    token_impact: s.tokenImpact,
     token_direction: s.tokenDirection,
     requires_user_context: s.requiresUserContext,
+    requires_clarification: s.requiresUserContext,
     context_question: s.contextQuestion,
+    clarification_question: s.contextQuestion,
+    source: s.source,
+    recommendation_score: s.recommendationScore === null ? null : Number(s.recommendationScore),
+    ranking: s.ranking,
     status: s.status,
     applied_version_id: s.appliedVersionId,
     feedback_at: s.feedbackAt?.toISOString() ?? null,

@@ -4,6 +4,7 @@ import { FEEDBACK_REASON_CODES, PREFERENCE_KEYS, TASK_CATEGORIES } from "@/lib/c
 import { MAX_EXPECTED_OUTPUT_TOKENS, MAX_TOKEN_COUNT_CHARS, OUTPUT_LENGTH_PRESETS } from "@/lib/config/estimates";
 import { HARD_MAX_PROMPT_CHARS } from "@/lib/config/plans";
 import { PROVENANCES } from "@/lib/db/schema";
+import { GENERATION_MODES, INTENT_CATEGORIES, SUGGESTION_KINDS } from "@/lib/intelligence/categories";
 import { EXPORT_FORMATS } from "@/lib/export";
 
 const taskCategory = z.enum(TASK_CATEGORIES);
@@ -212,6 +213,67 @@ export const analyseRequestSchema = z
     version_id: uuid.nullable().optional(),
     /** Re-analyse even if this version already has a completed analysis. */
     force: z.boolean().optional(),
+    /** Manual task category (Prompt Intelligence). */
+    category: z.enum(INTENT_CATEGORIES).nullable().optional(),
+  })
+  .strict();
+
+// ---------------------------------------------------------------------------
+// Prompt Intelligence (§14)
+// ---------------------------------------------------------------------------
+const intelligenceSource = {
+  /** Unsaved text, or an edited draft of prompt_id. */
+  prompt_text: z.string().max(HARD_MAX_PROMPT_CHARS).nullable().optional(),
+  prompt_id: uuid.nullable().optional(),
+  version_id: uuid.nullable().optional(),
+};
+const needsSource = (v: { prompt_text?: string | null; prompt_id?: string | null }) => Boolean(v.prompt_text?.trim() || v.prompt_id);
+const sourceMessage = { message: "Provide prompt_text or prompt_id." };
+
+export const intelligenceAnalyseSchema = z
+  .object({
+    ...intelligenceSource,
+    category: z.enum(INTENT_CATEGORIES).nullable().optional(),
+    target_model: z.string().max(100).nullable().optional(),
+    force: z.boolean().optional(),
+  })
+  .strict()
+  .refine(needsSource, sourceMessage);
+
+export const intelligenceReviseSchema = z
+  .object({
+    ...intelligenceSource,
+    mode: z.enum(GENERATION_MODES).optional(),
+    category: z.enum(INTENT_CATEGORIES).nullable().optional(),
+    target_model: z.string().max(100).nullable().optional(),
+    token_budget: z.number().int().min(10).max(200_000).nullable().optional(),
+    assumptions: z.array(z.string().max(400)).max(12).nullable().optional(),
+    answers: z.record(z.string().max(60), z.string().max(1000)).nullable().optional(),
+    suggestion_ids: z.array(uuid).max(12).optional(),
+    accepted_changes: z.array(z.object({ category: z.string().max(40), text: z.string().min(1).max(600) }).strict()).max(12).optional(),
+    custom_objective: z.string().max(500).nullable().optional(),
+  })
+  .strict()
+  .refine(needsSource, sourceMessage)
+  .refine((v) => Object.keys(v.answers ?? {}).length <= 12, { message: "Too many answers." });
+
+export const intelligenceValidateSchema = z
+  .object({
+    original: z.string().min(1).max(HARD_MAX_PROMPT_CHARS),
+    revised: z.string().min(1).max(HARD_MAX_PROMPT_CHARS * 3),
+    target_model: z.string().max(100).nullable().optional(),
+    /** Also run the model-assisted meaning check (uses analysis quota). */
+    semantic: z.boolean().optional(),
+  })
+  .strict();
+
+export const feedbackEventSchema = z
+  .object({
+    event_type: z.enum(["rated_helpful", "rated_unhelpful", "suggestion_dismissed", "suggestion_deferred"]),
+    run_id: uuid.nullable().optional(),
+    prompt_id: uuid.nullable().optional(),
+    suggestion_category: z.enum(SUGGESTION_KINDS).nullable().optional(),
+    task_category: z.enum(INTENT_CATEGORIES).nullable().optional(),
   })
   .strict();
 
@@ -248,10 +310,13 @@ export const promptPreferencesSchema = z
     preferred_style: z.enum(["natural", "structured", "bullet_points", "step_by_step"]).nullable().optional(),
     preferred_response_length: z.enum(["short", "medium", "long"]).nullable().optional(),
     token_efficiency_priority: z.enum(["low", "balanced", "high"]).optional(),
-    default_optimisation_mode: z.enum(["balanced", "token_saver", "quality_first"]).optional(),
+    default_optimisation_mode: z.enum(["detailed", "balanced", "token_saver", "quality_first"]).optional(),
     domains: z.array(z.string().max(40)).max(10).optional(),
     learn_from_feedback: z.boolean().optional(),
     background_analysis: z.boolean().optional(),
+    prompt_style: z.enum(["minimal", "balanced", "comprehensive"]).nullable().optional(),
+    task_categories: z.array(z.enum(INTENT_CATEGORIES)).max(11).optional(),
+    helpful_suggestion_categories: z.array(z.enum(SUGGESTION_KINDS)).max(10).optional(),
   })
   .strict()
   .refine((v) => Object.keys(v).length > 0, { message: "Provide at least one preference." });

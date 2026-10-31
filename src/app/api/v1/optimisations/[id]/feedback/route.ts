@@ -2,6 +2,7 @@ import { created, noContent, ok, parseJson, withApi } from "@/lib/api/handler";
 import { feedbackRequestSchema, idParamSchema } from "@/lib/api/validation";
 import { db } from "@/lib/db/client";
 import { deleteFeedback, serialiseFeedback, submitFeedback } from "@/lib/services/feedback";
+import { recordFeedbackEvent } from "@/lib/services/feedback-events";
 import { serialisePreference, upsertPreference } from "@/lib/services/preferences";
 
 /**
@@ -33,6 +34,7 @@ export const POST = withApi<"required", { id: string }>({ auth: "required", rate
   }
 
   const payload = { ...serialiseFeedback(feedback), saved_preference: savedPreference };
+  await recordFeedbackEvent(db, { userId: user.id, eventType: body.rating > 0 ? "rated_helpful" : "rated_unhelpful", runId: id });
   return isNew ? created(payload) : ok(payload);
 });
 

@@ -52,11 +52,8 @@ export function RowActions({ id, title, isFavourite, archived }: RowActionsProps
       <Link href={`/app/library/${id}`} className="btn btn-ghost btn-sm">
         Open
       </Link>
-      <Link href={`/app/library/${id}#suggestions`} className="btn btn-ghost btn-sm">
-        Analyse
-      </Link>
-      <Link href={`/app/library/${id}#optimise`} className="btn btn-ghost btn-sm">
-        Optimise
+      <Link href={`/app/intelligence?prompt=${id}`} className="btn btn-ghost btn-sm">
+        Improve
       </Link>
       <Link href={`/app/library/${id}#versions`} className="btn btn-ghost btn-sm">
         Compare

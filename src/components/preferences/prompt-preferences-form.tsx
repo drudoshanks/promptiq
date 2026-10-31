@@ -6,6 +6,8 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Switch } from "@/components/ui/field";
 import { api, errorMessage } from "@/lib/client/api";
+import { INTENT_CATEGORIES, INTENT_LABELS, SUGGESTION_KIND_LABELS, SUGGESTION_KINDS } from "@/lib/intelligence/categories";
+import { cx } from "@/lib/utils";
 
 export interface PromptPreferencesValue {
   preferred_model: string | null;
@@ -16,6 +18,9 @@ export interface PromptPreferencesValue {
   domains: string[];
   learn_from_feedback: boolean;
   background_analysis: boolean;
+  prompt_style: string | null;
+  task_categories: string[];
+  helpful_suggestion_categories: string[];
 }
 
 interface Props {
@@ -81,6 +86,7 @@ export function PromptPreferencesForm({ initial, models, feedbackHistory }: Prop
         <Field label="Default optimisation mode">
           {(p) => (
             <Select id={p.id} value={v.default_optimisation_mode} onChange={(e) => set("default_optimisation_mode", e.target.value)}>
+              <option value="detailed">Detailed</option>
               <option value="balanced">Balanced</option>
               <option value="token_saver">Token saver</option>
               <option value="quality_first">Quality first</option>
@@ -96,7 +102,17 @@ export function PromptPreferencesForm({ initial, models, feedbackHistory }: Prop
             </Select>
           )}
         </Field>
-        <Field label="Preferred prompt style">
+        <Field label="Preferred prompt style" help="How much detail generated prompts should carry.">
+          {(p) => (
+            <Select id={p.id} value={v.prompt_style ?? ""} onChange={(e) => set("prompt_style", e.target.value || null)} aria-describedby={p.describedBy}>
+              <option value="">No preference</option>
+              <option value="minimal">Minimal: only what is needed</option>
+              <option value="balanced">Balanced</option>
+              <option value="comprehensive">Comprehensive: full briefs</option>
+            </Select>
+          )}
+        </Field>
+        <Field label="Preferred output format">
           {(p) => (
             <Select id={p.id} value={v.preferred_style ?? ""} onChange={(e) => set("preferred_style", e.target.value || null)}>
               <option value="">No preference</option>
@@ -122,6 +138,21 @@ export function PromptPreferencesForm({ initial, models, feedbackHistory }: Prop
         </Field>
       </div>
 
+      <ChipGroup
+        legend="Task categories you work on"
+        help="Used only to order suggestions; leave empty for no preference."
+        options={INTENT_CATEGORIES.filter((c) => c !== "unknown").map((c) => ({ value: c, label: INTENT_LABELS[c] }))}
+        value={v.task_categories}
+        onChange={(x) => set("task_categories", x)}
+      />
+      <ChipGroup
+        legend="Suggestions you usually find helpful"
+        help="These kinds rank higher for you, alongside what you accept in practice."
+        options={SUGGESTION_KINDS.map((c) => ({ value: c, label: SUGGESTION_KIND_LABELS[c] }))}
+        value={v.helpful_suggestion_categories}
+        onChange={(x) => set("helpful_suggestion_categories", x)}
+      />
+
       <div className="space-y-5 border-t border-line pt-5">
         <Switch
           checked={v.learn_from_feedback}
@@ -142,7 +173,8 @@ export function PromptPreferencesForm({ initial, models, feedbackHistory }: Prop
           <p className="mt-2 text-sm text-ink-soft">Nothing yet. Accept or dismiss suggestions and they will show here.</p>
         ) : (
           <>
-            <table className="table mt-2">
+            <div className="relative mt-2 overflow-x-auto">
+            <table className="table">
               <thead>
                 <tr>
                   <th scope="col">Suggestion type</th>
@@ -160,6 +192,7 @@ export function PromptPreferencesForm({ initial, models, feedbackHistory }: Prop
                 ))}
               </tbody>
             </table>
+            </div>
             <Button className="mt-3" size="sm" variant="ghost" disabled={busy} onClick={resetFeedback}>
               Forget dismissed suggestions
             </Button>
@@ -167,5 +200,30 @@ export function PromptPreferencesForm({ initial, models, feedbackHistory }: Prop
         )}
       </div>
     </div>
+  );
+}
+
+function ChipGroup({ legend, help, options, value, onChange }: { legend: string; help: string; options: Array<{ value: string; label: string }>; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <fieldset>
+      <legend className="field-label">{legend}</legend>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((o) => {
+          const on = value.includes(o.value);
+          return (
+            <button
+              key={o.value}
+              type="button"
+              aria-pressed={on}
+              onClick={() => onChange(on ? value.filter((x) => x !== o.value) : [...value, o.value])}
+              className={cx("rounded-full border px-3 py-1 text-sm transition-colors", on ? "border-accent bg-accent-soft text-accent-deep" : "border-line-strong bg-panel text-ink-soft hover:text-ink")}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+      <p className="field-help">{help}</p>
+    </fieldset>
   );
 }

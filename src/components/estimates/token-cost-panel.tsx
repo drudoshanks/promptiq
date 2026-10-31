@@ -243,7 +243,7 @@ function SingleTable({ data }: { data: TokenEstimateResult }) {
 function ComparisonTable({ data }: { data: TokenComparisonResult }) {
   const cost = data.cost;
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table className="table">
         <thead>
           <tr>

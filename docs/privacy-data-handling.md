@@ -25,6 +25,15 @@ train models. Analyses and suggestions contain no copy of the prompt text, are
 deleted with the prompt or account, and are included in the account export.
 See docs/prompt-library.md.
 
+Prompt intelligence (docs/prompt-intelligence.md) adds `prompt_feedback_events`:
+explicit actions only (accepted, dismissed or deferred suggestions, chosen mode,
+saved revision, restored version, helpful/unhelpful), stored as categories and
+modes, never prompt text. They rank future suggestions for that user only, can
+be cleared from Preferences, are exported with the account and deleted with it.
+Requirement checklists and preservation reports store character offsets, not
+copies of the prompt. Unsaved text sent for analysis is not stored; a
+10-minute in-memory cache is keyed by a hash of it.
+
 ## Learning policy (FR-012, A-05)
 
 PromptIQ never converts a prompt, a rewrite or a feedback record into a

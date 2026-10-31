@@ -92,6 +92,17 @@ for suggestions, history and token/cost analytics, and explicit prompt
 preferences. Design, metrics definitions and privacy rules:
 [`docs/prompt-library.md`](docs/prompt-library.md).
 
+## Prompt intelligence
+
+`/app/intelligence` (also embedded on every saved prompt) classifies the task,
+scores completeness with a configurable weighted rubric, extracts the prompt's
+requirements, lists missing information, and ranks suggestions by your own
+feedback. It generates detailed, balanced, token-saver, quality-first or custom
+revisions, checks every requirement survived (repairing drops), and compares
+tokens and cost before saving a new version. Algorithms, API, data model and
+evaluation: [`docs/prompt-intelligence.md`](docs/prompt-intelligence.md).
+Evaluate with `npm run eval:intelligence`.
+
 ## Decisions and deviations from the SRS baseline
 
 - **Auth vendor.** The SRS leaves the vendor open (A-04). Better Auth was chosen

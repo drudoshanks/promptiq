@@ -56,7 +56,8 @@ export async function optimiseLibraryPrompt(ctx: OptimiseServiceContext, input: 
   }
 
   const prefs = await getPromptPreferences(db, user.id);
-  const mode = input.mode ?? prefs.defaultOptimisationMode;
+  // The legacy optimiser has no "detailed" mode; quality-first is its closest equivalent.
+  const mode: OptimiserMode = input.mode ?? (prefs.defaultOptimisationMode === "detailed" ? "quality_first" : prefs.defaultOptimisationMode);
   if (mode === "custom" && !input.customObjective?.trim()) {
     throw new AppError("VALIDATION_ERROR", "Describe your objective for custom optimisation.");
   }

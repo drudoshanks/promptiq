@@ -155,7 +155,14 @@ describe("analysis and suggestions (§5–6; criteria 7, 8, 15)", () => {
     expect(res.suggestions.length).toBeGreaterThan(2);
     expect(res.suggestions.every((s) => s.promptVersionId === p.versions[0]?.id)).toBe(true);
     const categories = res.suggestions.map((s) => s.category);
-    expect(categories).toEqual(expect.arrayContaining(["conflicting_constraints", "repetition", "ambiguity"]));
+    expect(categories).toEqual(expect.arrayContaining(["contradictions", "redundancy"]));
+    // Version-linked structured analysis: category, rubric and requirement offsets (no prompt text).
+    expect(res.analysis.taskCategory).toBeTruthy();
+    expect((res.analysis.dimensionScores as unknown[]).length).toBe(6);
+    const checklist = res.analysis.requirementChecklist as Array<{ start: number; end: number }>;
+    expect(checklist.length).toBeGreaterThan(0);
+    expect(VERBOSE.slice(checklist[0]!.start, checklist[0]!.end).length).toBeGreaterThan(0);
+    expect(res.suggestions.every((s) => s.expectedBenefit && s.recommendationScore !== null)).toBe(true);
     const reloaded = await getPrompt(t.db, user.id, p.id);
     expect(reloaded.latestQualityScore).toBe(res.analysis.qualityScore);
     expect(reloaded.pendingSuggestionCount).toBe(res.suggestions.length);
@@ -178,7 +185,7 @@ describe("analysis and suggestions (§5–6; criteria 7, 8, 15)", () => {
 
   it("reports an already well-optimised prompt explicitly", async () => {
     const user = await createUser(t.db, "an-good");
-    const p = await newPrompt(user, "Write a 120-word LinkedIn post for software engineers announcing our Manchester office opening on 3 November. Format: one paragraph, no emoji.");
+    const p = await newPrompt(user, "Write a 120-word LinkedIn post for software engineers announcing our Manchester office opening on 3 November. Use an upbeat, professional tone. Format: one paragraph, no emoji.");
     const res = await analysePrompt(anCtx(user), { promptId: p.id });
     expect(res.analysis.alreadyOptimised).toBe(true);
     expect(res.suggestions).toHaveLength(0);
@@ -200,33 +207,29 @@ describe("analysis and suggestions (§5–6; criteria 7, 8, 15)", () => {
     expect((await listSuggestions(t.db, user.id, { status: ["deferred"] })).map((s) => s.id)).toEqual([s3!.id]);
   });
 
-  it("personalises: token priority raises token suggestions; repeatedly dismissed categories are skipped", async () => {
+  it("personalises ranking from explicit decisions and preferences, and can be switched off", async () => {
     const user = await createUser(t.db, "an-personal");
-    const text = "Please write some things about our new product launch for the blog.";
+    const text = "Please could you write a blog post about our new product launch for the blog. Please could you write a blog post about our new product launch for the blog.";
     const p1 = await newPrompt(user, text);
     const before = await analysePrompt(anCtx(user), { promptId: p1.id });
-    const verbosity = before.suggestions.find((s) => s.category === "verbosity");
-    expect(verbosity?.priority).toBe("low");
-    const ambiguity = before.suggestions.find((s) => s.category === "ambiguity");
-    expect(ambiguity).toBeDefined();
+    const redundancy = before.suggestions.find((s) => s.category === "redundancy")!;
+    const baseline = Number(redundancy.recommendationScore);
 
-    await updatePromptPreferences(t.db, user.id, { tokenEfficiencyPriority: "high" });
-    // Dismiss "ambiguity" twice (two analyses) so it stops being suggested.
-    await setSuggestionStatus(t.db, user.id, ambiguity!.id, "dismissed");
-    const p2 = await newPrompt(user, text);
-    const mid = await analysePrompt(anCtx(user), { promptId: p2.id });
-    await setSuggestionStatus(t.db, user.id, mid.suggestions.find((s) => s.category === "ambiguity")!.id, "dismissed");
-    expect((await getFeedbackHistory(t.db, user.id))["ambiguity"]).toEqual({ accepted: 0, dismissed: 2 });
+    // Dismiss the redundancy suggestion on several prompts; each decision is logged as a feedback event.
+    await setSuggestionStatus(t.db, user.id, redundancy.id, "dismissed");
+    for (let i = 0; i < 9; i++) {
+      const p = await newPrompt(user, `${text} ${i}`);
+      const r = await analysePrompt(anCtx(user), { promptId: p.id });
+      await setSuggestionStatus(t.db, user.id, r.suggestions.find((s) => s.category === "redundancy")!.id, "dismissed");
+    }
+    expect((await getFeedbackHistory(t.db, user.id))["redundancy"]).toEqual({ accepted: 0, dismissed: 10 });
+    const after = await analysePrompt(anCtx(user), { promptId: (await newPrompt(user, `${text} again`)).id });
+    expect(Number(after.suggestions.find((s) => s.category === "redundancy")!.recommendationScore)).toBeLessThan(baseline);
 
-    const p3 = await newPrompt(user, text);
-    const after = await analysePrompt(anCtx(user), { promptId: p3.id });
-    expect(after.suggestions.find((s) => s.category === "verbosity")?.priority).toBe("high");
-    expect(after.suggestions.some((s) => s.category === "ambiguity")).toBe(false);
-
-    // Learning can be switched off.
-    await updatePromptPreferences(t.db, user.id, { learnFromFeedback: false });
-    const p4 = await newPrompt(user, text);
-    expect((await analysePrompt(anCtx(user), { promptId: p4.id })).suggestions.some((s) => s.category === "ambiguity")).toBe(true);
+    // An explicit preference raises token suggestions; switching learning off ignores the history.
+    await updatePromptPreferences(t.db, user.id, { tokenEfficiencyPriority: "high", learnFromFeedback: false });
+    const off = await analysePrompt(anCtx(user), { promptId: (await newPrompt(user, `${text} off`)).id });
+    expect(Number(off.suggestions.find((s) => s.category === "redundancy")!.recommendationScore)).toBeGreaterThan(baseline);
   });
 
   it("enforces the analysis quota (criterion 17)", async () => {
@@ -243,7 +246,7 @@ describe("analysis and suggestions (§5–6; criteria 7, 8, 15)", () => {
     const user = await createUser(t.db, "an-fail");
     const p = await newPrompt(user, VERBOSE);
     const failing = Object.assign(Object.create(mock), {
-      analyse: async () => {
+      analyseIntent: async () => {
         throw new ProviderError("PROVIDER_TIMEOUT", "timeout");
       },
     }) as AiProvider;

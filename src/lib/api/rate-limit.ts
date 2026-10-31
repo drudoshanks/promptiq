@@ -70,6 +70,10 @@ export const RATE_LIMITS = {
   ipPerMinute: { limit: 240, windowMs: 60_000 },
   /** AI prompt analyses per authenticated user. */
   analysePerMinute: { limit: 6, windowMs: 60_000 },
+  /** Prompt Intelligence: analyses, revisions and validation checks. */
+  intelligenceAnalysePerMinute: { limit: 10, windowMs: 60_000 },
+  revisePerMinute: { limit: 8, windowMs: 60_000 },
+  validatePerMinute: { limit: 30, windowMs: 60_000 },
   /** Token counting while typing (debounced client-side, ~300 ms). */
   estimatePerMinute: { limit: 120, windowMs: 60_000 },
   /** Account-wide expensive operations (exports). */
