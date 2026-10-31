@@ -22,6 +22,7 @@ export const POST = withApi({ auth: "required", rateLimit: "revisePerMinute" }, 
     suggestionIds: body.suggestion_ids,
     acceptedChanges: body.accepted_changes,
     customObjective: body.custom_objective ?? null,
+    autoSave: body.auto_save,
   });
   return created(result);
 });

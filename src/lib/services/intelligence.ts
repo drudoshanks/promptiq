@@ -15,6 +15,8 @@ import { INTELLIGENCE_TEMPLATE_VERSION } from "@/lib/intelligence/instructions";
 import { compactReport, REQUIREMENT_KIND_LABELS, validatePreservation, type PreservationReport } from "@/lib/intelligence/requirements";
 import type { RequestLogger } from "@/lib/logger";
 import { normalisePrompt } from "@/lib/optimiser/normalise";
+import { resolvePreferences } from "@/lib/optimiser/preferences";
+import { savedPreferenceLines } from "@/lib/intelligence/saved-preferences";
 import { userKeyFor } from "@/lib/optimiser/service";
 import type { IntelligenceProvider, ProviderAttempt } from "@/lib/providers/types";
 
@@ -22,8 +24,9 @@ import { analysePrompt, getLatestAnalysis, getOwnedSuggestions, providerFailure,
 import { compareTexts, estimateText, recordApiUsage, recordTokenEstimate, summariseUsage, type TokenComparisonResult } from "./estimates";
 import { recordFeedbackEvent, recordFeedbackEvents } from "./feedback-events";
 import { getPromptPreferences, getRankingContext, preferencesForModel } from "./prompt-preferences";
-import { getPrompt } from "./prompts";
-import { assertAnalysisQuotaAvailable, assertQuotaAvailable, finaliseRun, globalSpendTodayUsd, recordAnalysisUsage, recordRun, recordRunComparison, recordUsage } from "./usage";
+import { listEnabledPreferences } from "./preferences";
+import { createPrompt, getPrompt, refreshPromptStats } from "./prompts";
+import { assertAnalysisQuotaAvailable, assertQuotaAvailable, finaliseRun, globalSpendTodayUsd, linkRunToVersions, recordAnalysisUsage, recordRun, recordRunComparison, recordUsage } from "./usage";
 
 /**
  * Prompt Intelligence service: ownership, quotas, persistence and usage
@@ -260,6 +263,8 @@ export interface ReviseInput {
   /** Recommendations of unsaved-analysis suggestions the user accepted. */
   acceptedChanges?: Array<{ category: string; text: string }>;
   customObjective?: string | null;
+  /** Set false to skip auto-save for this request even when the setting is on. */
+  autoSave?: boolean;
 }
 
 export async function reviseForUser(ctx: IntelligenceContext, input: ReviseInput) {
@@ -284,6 +289,11 @@ export async function reviseForUser(ctx: IntelligenceContext, input: ReviseInput
   await assertSpendCap(ctx);
 
   const classification = quickClassification(src.text, input.category ?? null);
+
+  // Saved rewrite preferences (tone, detail, format…), only when personalisation is on.
+  const saved = user.personalisationEnabled ? await listEnabledPreferences(db, user.id) : [];
+  const resolution = resolvePreferences({ taskCategory: TO_TASK_CATEGORY[classification.primary], requestPreferences: undefined, savedPreferences: saved, personalisationEnabled: user.personalisationEnabled });
+  const prefLines = savedPreferenceLines(resolution.effective, src.text);
   const run = await recordRun(db, {
     userId: user.id,
     provider: provider.name,
@@ -334,6 +344,7 @@ export async function reviseForUser(ctx: IntelligenceContext, input: ReviseInput
       answers: input.answers ?? null,
       acceptedChanges,
       acceptedKinds,
+      preferenceLines: prefLines.lines,
       customObjective: input.customObjective ?? null,
       tokenBudget: input.tokenBudget ?? null,
       targetModel,
@@ -403,8 +414,39 @@ export async function reviseForUser(ctx: IntelligenceContext, input: ReviseInput
     ...(input.acceptedChanges ?? []).map((c) => ({ userId: user.id, eventType: "suggestion_accepted" as const, runId: run.id, suggestionCategory: toSuggestionKind(c.category), taskCategory: classification.primary })),
   ]);
 
-  log.info("revision completed", { run_id: run.id, mode: input.mode, engine: result.engine, iterations: result.iterations, preservation: result.report.status, tokens_saved: estimate.tokens_saved });
-  return presentRevision(run.id, src, input.mode, classification, result, estimate, usage.summary, persisted.map((s) => s.id));
+  // Auto-save (the user's "Auto-save prompts I optimise" setting): unsaved text is saved with the
+  // original and the proposal as versions. Later drafts of it are sent with its prompt_id, so it is saved once.
+  let autoSaved: { prompt_id: string; original_version_id: string; proposed_version_id: string } | null = null;
+  let autoSaveSkipped: "library_full" | null = null;
+  if (!src.promptId && user.historyEnabled && input.autoSave !== false) {
+    try {
+      const savedPrompt = await createPrompt(db, user.id, planFor(user.planCode), {
+        category: TO_TASK_CATEGORY[classification.primary],
+        targetModel: estimate.model,
+        versions: [
+          { promptText: src.text, provenance: "original" },
+          { promptText: result.revised_prompt, provenance: "ai_optimised", changeSummary: result.key_improvements.slice(0, 6) },
+        ],
+      });
+      const [original, proposed] = savedPrompt.versions;
+      if (original && proposed) {
+        await linkRunToVersions(db, run.id, { promptId: savedPrompt.id, sourceVersionId: original.id, resultVersionId: proposed.id });
+        await refreshPromptStats(db, savedPrompt.id);
+        autoSaved = { prompt_id: savedPrompt.id, original_version_id: original.id, proposed_version_id: proposed.id };
+      }
+    } catch (error) {
+      if (error instanceof AppError && error.code === "FORBIDDEN") autoSaveSkipped = "library_full";
+      else throw error;
+    }
+  }
+
+  log.info("revision completed", { run_id: run.id, mode: input.mode, engine: result.engine, iterations: result.iterations, preservation: result.report.status, tokens_saved: estimate.tokens_saved, auto_saved: Boolean(autoSaved) });
+  return {
+    ...presentRevision(run.id, src, input.mode, classification, result, estimate, usage.summary, persisted.map((s) => s.id)),
+    preferences_applied: { effective: prefLines.applied, skipped_because_prompt_says_otherwise: prefLines.skipped, personalisation_enabled: user.personalisationEnabled },
+    auto_saved: autoSaved,
+    auto_save_skipped: autoSaveSkipped,
+  };
 }
 
 async function persistEstimates(db: Db, userId: string, runId: string, versionId: string | null, estimate: TokenComparisonResult) {

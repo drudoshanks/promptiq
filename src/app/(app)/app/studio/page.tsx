@@ -1,61 +1,67 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import { PromptStudio } from "@/components/studio/prompt-studio";
+import { IntelligenceWorkspace } from "@/components/intelligence/workspace";
 import { getCurrentUser } from "@/lib/auth/session";
-import { isTaskCategory, type TaskCategory } from "@/lib/categories";
 import { DEFAULT_TARGET_MODEL } from "@/lib/config/models";
 import { planFor } from "@/lib/config/plans";
 import { db } from "@/lib/db/client";
 import { isUuid } from "@/lib/db/scope";
 import { listModelOptions } from "@/lib/services/estimates";
+import { getStoredAnalysisView } from "@/lib/services/intelligence";
 import { listEnabledPreferences } from "@/lib/services/preferences";
+import { getPromptPreferences } from "@/lib/services/prompt-preferences";
 import { getPrompt } from "@/lib/services/prompts";
 
-export const metadata: Metadata = { title: "Prompt studio" };
+export const metadata: Metadata = { title: "Studio" };
 
-interface StudioSearchParams {
-  prompt?: string;
-  version?: string;
-}
-
-export default async function StudioPage({ searchParams }: { searchParams: Promise<StudioSearchParams> }) {
+/**
+ * The single prompt workspace: write, analyse, optimise (any mode), check
+ * requirements, compare tokens and cost, then save or export. Combines the
+ * former Quick studio and Prompt intelligence pages.
+ */
+export default async function StudioPage({ searchParams }: { searchParams: Promise<{ prompt?: string; version?: string }> }) {
   const user = await getCurrentUser();
-  if (!user) redirect("/sign-in");
+  if (!user) redirect("/sign-in?next=/app/studio");
   const params = await searchParams;
-  const plan = planFor(user.planCode);
+  const [models, prefs, saved] = await Promise.all([
+    listModelOptions(db),
+    getPromptPreferences(db, user.id),
+    user.personalisationEnabled ? listEnabledPreferences(db, user.id) : Promise.resolve([]),
+  ]);
 
-  // Re-optimise an existing version from the library (owner-scoped lookup).
-  let initialText = "";
-  let initialCategory: TaskCategory | "auto" = "auto";
+  let prompt = null;
+  let initialAnalysis = null;
+  let defaultModel = prefs.preferredModel ?? DEFAULT_TARGET_MODEL;
   if (params.prompt && isUuid(params.prompt)) {
     try {
-      const prompt = await getPrompt(db, user.id, params.prompt);
-      const version = params.version && isUuid(params.version) ? prompt.versions.find((v) => v.id === params.version) : prompt.versions[prompt.versions.length - 1];
+      const p = await getPrompt(db, user.id, params.prompt);
+      const version = params.version && isUuid(params.version) ? p.versions.find((v) => v.id === params.version) : p.versions[p.versions.length - 1];
       if (version) {
-        initialText = version.promptText;
-        if (isTaskCategory(prompt.category)) initialCategory = prompt.category;
+        prompt = { id: p.id, title: p.title, versionId: version.id, versionNumber: version.versionNumber, text: version.promptText };
+        defaultModel = p.targetModel ?? defaultModel;
+        if (version.id === p.currentVersionId) initialAnalysis = await getStoredAnalysisView(db, user.id, p.id, defaultModel);
       }
     } catch {
-      // Not found or not owned: open an empty studio rather than leaking anything.
+      prompt = null; // not found or not owned: open an empty studio rather than leaking anything
     }
   }
 
-  const [preferences, models] = await Promise.all([
-    user.personalisationEnabled ? listEnabledPreferences(db, user.id) : Promise.resolve([]),
-    listModelOptions(db),
-  ]);
-
   return (
-    <PromptStudio
-      initialText={initialText}
-      initialCategory={initialCategory}
-      maxPromptChars={plan.maxPromptChars}
-      historyEnabled={user.historyEnabled}
-      personalisationEnabled={user.personalisationEnabled}
-      savedPreferenceCount={preferences.length}
-      models={models}
-      defaultModel={DEFAULT_TARGET_MODEL}
+    <IntelligenceWorkspace
+      key={prompt?.versionId ?? "new"}
+      models={models.map((m) => ({ id: m.id, label: m.label }))}
+      defaultModel={defaultModel}
+      defaultMode={prefs.defaultOptimisationMode}
+      prompt={prompt}
+      initialAnalysis={initialAnalysis}
+      studio={{
+        historyEnabled: user.historyEnabled,
+        personalisationEnabled: user.personalisationEnabled,
+        savedPreferenceCount: saved.length,
+        maxPromptChars: planFor(user.planCode).maxPromptChars,
+        modelOptions: models,
+      }}
     />
   );
 }

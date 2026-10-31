@@ -88,7 +88,7 @@ export class MockOptimiserProvider implements AiProvider {
   /** Deterministic revision: render the structured intent with the category template. */
   async revisePrompt(request: RevisionRequest): Promise<StructuredResult<ModelRevision>> {
     await this.wait();
-    let text = renderPrompt(request.intent, request.template, { mode: request.mode, acceptedKinds: request.acceptedKinds, acceptedChanges: request.acceptedChanges, customObjective: request.customObjective, questions: request.questions });
+    let text = renderPrompt(request.intent, request.template, { mode: request.mode, acceptedKinds: request.acceptedKinds, acceptedChanges: request.acceptedChanges, preferenceLines: request.preferenceLines, customObjective: request.customObjective, questions: request.questions });
     if (request.restore.length) text = `${text}\n\nAlso required:\n${request.restore.map((r) => `- ${r.replace(/^([-*•]|\d+[.)])\s+/, "")}`).join("\n")}`;
     const improvements: string[] = [];
     if (request.mode === "detailed" || request.mode === "quality_first") improvements.push(`Organised into ${request.template.label.toLowerCase()} sections so nothing is left implicit.`);
@@ -97,6 +97,7 @@ export class MockOptimiserProvider implements AiProvider {
     if (request.mode === "custom" && request.customObjective) improvements.push(`Rewritten for your objective: ${request.customObjective.slice(0, 80)}.`);
     if (request.acceptedChanges.length) improvements.push(`Applied ${request.acceptedChanges.length} accepted suggestion${request.acceptedChanges.length > 1 ? "s" : ""}.`);
     if (request.intent.missing_information.length) improvements.push("Marked missing information as editable placeholders instead of guessing.");
+    if (request.preferenceLines.length) improvements.push(`Applied ${request.preferenceLines.length} of your saved preference${request.preferenceLines.length > 1 ? "s" : ""}.`);
     if (request.restore.length) improvements.push(`Restored ${request.restore.length} requirement${request.restore.length > 1 ? "s" : ""} an earlier draft dropped.`);
     const output: ModelRevision = { revised_prompt: text, key_improvements: improvements, assumptions_introduced: request.intent.assumptions, clarification_questions: request.questions.filter((q) => request.intent.missing_information.includes(q.key)).map((q) => q.question) };
     return { kind: "ok", output, modelId: this.modelId, attempts: this.attempt(approximateTokens(request.prompt) + 900, approximateTokens(text) + 80) };

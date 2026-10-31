@@ -252,6 +252,8 @@ export const intelligenceReviseSchema = z
     suggestion_ids: z.array(uuid).max(12).optional(),
     accepted_changes: z.array(z.object({ category: z.string().max(40), text: z.string().min(1).max(600) }).strict()).max(12).optional(),
     custom_objective: z.string().max(500).nullable().optional(),
+    /** false skips auto-save for this request even when the setting is on. */
+    auto_save: z.boolean().optional(),
   })
   .strict()
   .refine(needsSource, sourceMessage)

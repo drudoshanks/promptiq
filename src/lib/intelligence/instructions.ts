@@ -42,6 +42,7 @@ export function buildRevisionInstructions(): string {
     "- If information in intent.missing_information materially affects the result, either keep it as a clearly marked placeholder like [Add: technology stack] or as a question the assistant should ask first.",
     "- Do not add constraints that contradict the original. Avoid redundant instructions and unnecessary role descriptions.",
     "- Apply accepted_changes the user approved.",
+    "- Apply saved_preferences (the user's own standing preferences) unless the prompt already says otherwise.",
     "- If restore lists requirements a previous draft dropped, include each of them.",
     "- Respect token_budget when given, but never drop a requirement to meet it.",
     "Mode rules:",
@@ -68,6 +69,7 @@ export function buildRevisionPayload(input: {
   intent: IntentRepresentation;
   template: PromptTemplate;
   acceptedChanges: string[];
+  preferenceLines: string[];
   customObjective: string | null;
   tokenBudget: number | null;
   restore: string[];
@@ -80,6 +82,7 @@ export function buildRevisionPayload(input: {
     template: { id: input.template.id, role: input.template.role, sections: input.template.sections.map((s) => ({ heading: s.heading, guidance: s.guidance, detailed_only: Boolean(s.detailedOnly) })) },
     intent: input.intent,
     accepted_changes: input.acceptedChanges,
+    saved_preferences: input.preferenceLines,
     token_budget: input.tokenBudget,
     restore: input.restore,
     user_preferences: input.preferences,

@@ -43,6 +43,8 @@ export interface RevisionRequest {
   template: PromptTemplate;
   acceptedChanges: string[];
   acceptedKinds: SuggestionKind[];
+  /** Saved rewrite preferences to apply, as prompt lines (prompt instructions win). */
+  preferenceLines: string[];
   customObjective: string | null;
   tokenBudget: number | null;
   /** Requirements a previous draft dropped, to put back. */

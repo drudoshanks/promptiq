@@ -146,6 +146,7 @@ export interface RevisionInput {
   answers?: Record<string, string> | null;
   acceptedChanges?: string[];
   acceptedKinds?: SuggestionKind[];
+  preferenceLines?: string[];
   customObjective?: string | null;
   tokenBudget?: number | null;
   targetModel: string;
@@ -205,7 +206,7 @@ export async function reviseText(input: RevisionInput): Promise<RevisionResult> 
   };
 
   // Token saver: try the deterministic pipeline first — no model call if it is enough.
-  if (input.mode === "token_saver" && !input.acceptedChanges?.length && !Object.keys(input.answers ?? {}).length) {
+  if (input.mode === "token_saver" && !input.acceptedChanges?.length && !input.preferenceLines?.length && !Object.keys(input.answers ?? {}).length) {
     const local = await compressFor(input.text);
     const fits = !budget || local.tokens_after <= budget;
     // Safe and within budget: done without a model call, even if nothing could be cut.
@@ -241,6 +242,7 @@ export async function reviseText(input: RevisionInput): Promise<RevisionResult> 
           template,
           acceptedChanges: input.acceptedChanges ?? [],
           acceptedKinds: input.acceptedKinds ?? [],
+          preferenceLines: input.preferenceLines ?? [],
           customObjective: input.customObjective ?? null,
           tokenBudget: budget,
           restore,
