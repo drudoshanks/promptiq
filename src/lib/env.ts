@@ -39,6 +39,20 @@ const schema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_PRO_MONTHLY: z.string().optional(),
 
+  // UPI payments (manual verification). Payments are disabled until UPI_VPA is set.
+  UPI_VPA: z
+    .string()
+    .optional()
+    .transform((v) => (v ?? "").trim().toLowerCase())
+    .refine((v) => v === "" || /^[a-z0-9._-]{2,256}@[a-z][a-z0-9.-]{1,63}$/.test(v), "UPI_VPA must look like name@bank"),
+  UPI_PAYEE_NAME: z
+    .string()
+    .default("PromptIQ")
+    .transform((v) => v.trim().replace(/\s+/g, " "))
+    .refine((v) => /^[A-Za-z0-9 .&'-]{2,50}$/.test(v), "UPI_PAYEE_NAME may contain letters, digits, spaces and . & ' - (2–50 characters)"),
+  UPI_REQUEST_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(48),
+  PAYMENT_SCREENSHOT_RETENTION_DAYS: z.coerce.number().int().min(7).max(3650).default(180),
+
   ADMIN_EMAILS: z
     .string()
     .optional()
@@ -73,4 +87,5 @@ export const features = {
   githubAuth: Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
   billing: Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_PRICE_PRO_MONTHLY),
   email: Boolean(env.RESEND_API_KEY),
+  upiPayments: Boolean(env.UPI_VPA),
 };

@@ -103,6 +103,15 @@ tokens and cost before saving a new version. Algorithms, API, data model and
 evaluation: [`docs/prompt-intelligence.md`](docs/prompt-intelligence.md).
 Evaluate with `npm run eval:intelligence`.
 
+## UPI payments (India)
+
+Users buy Pro by paying the business UPI ID (QR code or copy) and submitting
+their transaction reference; an administrator verifies each payment against the
+bank statement or UPI merchant app, and only that activates the subscription
+(transactionally, exactly once). No payment gateway. Set `UPI_VPA`,
+`UPI_PAYEE_NAME` and `ADMIN_EMAILS`, run `npm run db:migrate`, and schedule
+`npm run payments:maintenance`. Details: [`docs/upi-payments.md`](docs/upi-payments.md).
+
 ## Decisions and deviations from the SRS baseline
 
 - **Auth vendor.** The SRS leaves the vendor open (A-04). Better Auth was chosen

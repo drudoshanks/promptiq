@@ -199,3 +199,10 @@ documented in [`prompt-intelligence.md`](prompt-intelligence.md#api).
 response adds `classification`, `score.dimensions`, `missing_information`,
 `requirements` (text read from the analysed version via stored offsets) and
 `is_current`.
+
+
+## UPI payments
+
+`/billing/plans`, `/billing/payment-requests` (+ `/{id}`, `/{id}/submit`,
+`/{id}/cancel`), `/billing/subscription`, and administrator routes under
+`/admin/payments`. See [`upi-payments.md`](upi-payments.md#api).

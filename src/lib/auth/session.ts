@@ -6,6 +6,7 @@ import { cache } from "react";
 import { db } from "@/lib/db/client";
 import type { AppUser } from "@/lib/db/schema";
 import { env } from "@/lib/env";
+import { enforceManualSubscriptionExpiry } from "@/lib/services/payments";
 import { ensureAppUser } from "@/lib/services/users";
 
 import { auth, FRESH_SESSION_MS } from "./auth";
@@ -36,6 +37,9 @@ export async function getCurrentUserFromHeaders(requestHeaders: Headers): Promis
     displayName: result.user.name,
   });
   if (appUser.deletedAt) return null;
+  // Manually paid (UPI) subscriptions end on their period end: downgrade before
+  // any entitlement check sees this request.
+  if (appUser.planCode !== "free" && (await enforceManualSubscriptionExpiry(db, appUser.id))) appUser.planCode = "free";
 
   const createdAt = new Date(result.session.createdAt);
   return {

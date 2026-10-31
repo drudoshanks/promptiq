@@ -27,7 +27,7 @@ afterAll(async () => {
 describe("migrations", () => {
   it("apply once and are idempotent", async () => {
     const rows = (await t.client.query("SELECT name FROM schema_migrations ORDER BY name")).rows as Array<{ name: string }>;
-    expect(rows.map((r) => r.name)).toEqual(["0001_init.sql", "0002_row_level_security.sql", "0003_token_cost_engine.sql", "0004_prompt_library.sql", "0005_prompt_intelligence.sql"]);
+    expect(rows.map((r) => r.name)).toEqual(["0001_init.sql", "0002_row_level_security.sql", "0003_token_cost_engine.sql", "0004_prompt_library.sql", "0005_prompt_intelligence.sql", "0006_upi_payments.sql"]);
   });
 
   it("create every table from SRS §9.1", async () => {

@@ -76,6 +76,11 @@ export const RATE_LIMITS = {
   validatePerMinute: { limit: 30, windowMs: 60_000 },
   /** Token counting while typing (debounced client-side, ~300 ms). */
   estimatePerMinute: { limit: 120, windowMs: 60_000 },
+  /** UPI payments: request creation and payment-detail submission per user. */
+  paymentCreatePerHour: { limit: 10, windowMs: 3_600_000 },
+  paymentSubmitPerHour: { limit: 10, windowMs: 3_600_000 },
+  /** Administrator payment actions. */
+  adminPaymentsPerMinute: { limit: 60, windowMs: 60_000 },
   /** Account-wide expensive operations (exports). */
   exportPerHour: { limit: 5, windowMs: 3_600_000 },
 } as const;

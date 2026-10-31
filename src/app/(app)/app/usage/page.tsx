@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { Alert } from "@/components/ui/alert";
@@ -90,6 +91,11 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
           ) : null}
           <div className="mt-5">
             <PlanActions planCode={user.planCode} billingEnabled={features.billing} hasBillingAccount={Boolean(subscription?.providerCustomerId)} />
+            {features.upiPayments ? (
+              <p className="mt-3 text-sm">
+                Paying from India? <Link href="/app/billing" className="underline">Pay with UPI</Link> (verified manually, no automatic renewals).
+              </p>
+            ) : null}
           </div>
         </section>
       </div>

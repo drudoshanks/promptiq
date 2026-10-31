@@ -8,6 +8,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -656,3 +657,142 @@ export type ApiUsageRecord = typeof apiUsageRecords.$inferSelect;
 export type PromptAnalysis = typeof promptAnalyses.$inferSelect;
 export type PromptSuggestion = typeof promptSuggestions.$inferSelect;
 export type UserPromptPreferences = typeof userPromptPreferences.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// UPI payments with manual verification (migration 0006)
+// ---------------------------------------------------------------------------
+const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
+  dataType: () => "bytea",
+  fromDriver: (v) => (Buffer.isBuffer(v) ? v : Buffer.from(v)),
+});
+
+export const billingPlans = pgTable("billing_plans", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  code: text("code").notNull().unique(),
+  entitlement: text("entitlement", { enum: ["pro"] }).notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  amountMinor: integer("amount_minor").notNull(),
+  currency: text("currency", { enum: ["INR"] }).notNull().default("INR"),
+  billingPeriod: text("billing_period", { enum: ["month", "year"] }).notNull(),
+  periodMonths: smallint("period_months").notNull(),
+  active: boolean("active").notNull().default(true),
+  sortOrder: smallint("sort_order").notNull().default(0),
+  createdAt: tz("created_at").notNull().defaultNow(),
+  updatedAt: tz("updated_at").notNull().defaultNow(),
+});
+
+export const PAYMENT_STATUSES = ["PENDING_PAYMENT", "SUBMITTED_FOR_VERIFICATION", "UNDER_REVIEW", "VERIFIED", "REJECTED", "CANCELLED", "EXPIRED"] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+export const paymentRequests = pgTable(
+  "payment_requests",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => billingPlans.id),
+    paymentReference: text("payment_reference").notNull().unique(),
+    expectedAmountMinor: integer("expected_amount_minor").notNull(),
+    currency: text("currency", { enum: ["INR"] }).notNull().default("INR"),
+    payeeVpa: text("payee_vpa").notNull(),
+    payeeName: text("payee_name").notNull(),
+    status: text("status", { enum: PAYMENT_STATUSES }).notNull().default("PENDING_PAYMENT"),
+    transactionReferenceNormalized: text("transaction_reference_normalized"),
+    amountMismatch: boolean("amount_mismatch").notNull().default(false),
+    infoRequested: boolean("info_requested").notNull().default(false),
+    infoRequestMessage: text("info_request_message"),
+    rejectionReason: text("rejection_reason"),
+    assignedAdminId: uuid("assigned_admin_id").references(() => appUsers.id, { onDelete: "set null" }),
+    verifiedAmountMinor: integer("verified_amount_minor"),
+    expiresAt: tz("expires_at").notNull(),
+    submittedAt: tz("submitted_at"),
+    reviewedAt: tz("reviewed_at"),
+    verifiedAt: tz("verified_at"),
+    rejectedAt: tz("rejected_at"),
+    cancelledAt: tz("cancelled_at"),
+    createdAt: tz("created_at").notNull().defaultNow(),
+    updatedAt: tz("updated_at").notNull().defaultNow(),
+  },
+  (t) => [index("idx_payment_requests_user_created").on(t.userId, t.createdAt), index("idx_payment_requests_status_created").on(t.status, t.createdAt)],
+);
+
+export const paymentScreenshots = pgTable("payment_screenshots", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  paymentRequestId: uuid("payment_request_id")
+    .notNull()
+    .references(() => paymentRequests.id, { onDelete: "cascade" }),
+  contentType: text("content_type", { enum: ["image/png", "image/jpeg", "image/webp"] }).notNull(),
+  byteSize: integer("byte_size").notNull(),
+  sha256: text("sha256").notNull(),
+  data: bytea("data").notNull(),
+  createdAt: tz("created_at").notNull().defaultNow(),
+});
+
+export const paymentSubmissions = pgTable("payment_submissions", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  paymentRequestId: uuid("payment_request_id")
+    .notNull()
+    .references(() => paymentRequests.id, { onDelete: "cascade" }),
+  transactionReference: text("transaction_reference").notNull(),
+  transactionReferenceNormalized: text("transaction_reference_normalized").notNull(),
+  amountMinor: integer("amount_minor").notNull(),
+  amountMismatch: boolean("amount_mismatch").notNull().default(false),
+  paidAt: tz("paid_at").notNull(),
+  screenshotId: uuid("screenshot_id").references(() => paymentScreenshots.id, { onDelete: "set null" }),
+  userNotes: text("user_notes"),
+  submittedAt: tz("submitted_at").notNull().defaultNow(),
+});
+
+export const PAYMENT_REVIEW_ACTIONS = ["marked_under_review", "verified", "rejected", "information_requested", "recovered"] as const;
+export type PaymentReviewAction = (typeof PAYMENT_REVIEW_ACTIONS)[number];
+
+export const paymentReviews = pgTable("payment_reviews", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  paymentRequestId: uuid("payment_request_id")
+    .notNull()
+    .references(() => paymentRequests.id, { onDelete: "cascade" }),
+  adminUserId: uuid("admin_user_id").references(() => appUsers.id, { onDelete: "set null" }),
+  action: text("action", { enum: PAYMENT_REVIEW_ACTIONS }).notNull(),
+  fromStatus: text("from_status").notNull(),
+  toStatus: text("to_status").notNull(),
+  reason: text("reason"),
+  verificationNotes: text("verification_notes"),
+  createdAt: tz("created_at").notNull().defaultNow(),
+});
+
+export const SUBSCRIPTION_EVENT_TYPES = ["activated", "renewed", "expired", "expiry_reminder_sent"] as const;
+
+export const subscriptionEvents = pgTable("subscription_events", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => appUsers.id, { onDelete: "cascade" }),
+  subscriptionId: uuid("subscription_id").references(() => subscriptions.id, { onDelete: "set null" }),
+  paymentRequestId: uuid("payment_request_id").references(() => paymentRequests.id, { onDelete: "set null" }),
+  eventType: text("event_type", { enum: SUBSCRIPTION_EVENT_TYPES }).notNull(),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: tz("created_at").notNull().defaultNow(),
+});
+
+export const notificationOutbox = pgTable("notification_outbox", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").references(() => appUsers.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+  status: text("status", { enum: ["pending", "sent", "failed"] }).notNull().default("pending"),
+  attempts: smallint("attempts").notNull().default(0),
+  nextAttemptAt: tz("next_attempt_at").notNull().defaultNow(),
+  lastError: text("last_error"),
+  sentAt: tz("sent_at"),
+  createdAt: tz("created_at").notNull().defaultNow(),
+});
+
+export type BillingPlan = typeof billingPlans.$inferSelect;
+export type PaymentRequest = typeof paymentRequests.$inferSelect;
+export type PaymentSubmission = typeof paymentSubmissions.$inferSelect;
+export type PaymentReview = typeof paymentReviews.$inferSelect;
+export type SubscriptionEvent = typeof subscriptionEvents.$inferSelect;

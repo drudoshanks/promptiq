@@ -34,6 +34,17 @@ Requirement checklists and preservation reports store character offsets, not
 copies of the prompt. Unsaved text sent for analysis is not stored; a
 10-minute in-memory cache is keyed by a hash of it.
 
+## UPI payments
+
+Payment requests store the plan, amount, reference and the user's claimed UPI
+transaction reference, payment time, notes and optional screenshot. PromptIQ
+never asks for or stores UPI PINs, OTPs or bank credentials. Screenshots live in
+the database (never a public directory), are visible only to administrators,
+and are deleted `PAYMENT_SCREENSHOT_RETENTION_DAYS` (default 180) after the
+request is decided. Payment and subscription audit records are append-only and,
+like other billing records, are kept after account deletion for accounting.
+See docs/upi-payments.md.
+
 ## Learning policy (FR-012, A-05)
 
 PromptIQ never converts a prompt, a rewrite or a feedback record into a
