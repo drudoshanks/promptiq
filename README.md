@@ -14,7 +14,7 @@ final prompt is never executed.
 | Web and API | Next.js 16 (App Router, route handlers), React 19, TypeScript strict | `src/app`, `src/components` |
 | Database | PostgreSQL 14+ via Drizzle ORM, plain SQL migrations | `db/migrations`, `src/lib/db` |
 | Auth | Better Auth: email + password with recovery, Google and GitHub OAuth | one-file integration in `src/lib/auth/auth.ts`; the app only calls `getCurrentUser()` |
-| Optimiser | Official `openai` SDK, Responses API with Structured Outputs, behind a provider adapter with a deterministic `mock` mode | `src/lib/providers`, `src/lib/optimiser` |
+| Optimiser | Provider adapter: open-source models over any OpenAI-compatible chat API (Ollama, vLLM, Groq, OpenRouter ...), the OpenAI Responses API, or the built-in rule-based engine | `src/lib/providers`, `src/lib/optimiser` |
 | Billing | Stripe Checkout + Customer Portal, signed and idempotent webhooks | `src/lib/services/billing.ts` |
 | Styling | Tailwind CSS 4 with a small token set | `src/app/globals.css` |
 | Tests | Vitest (unit + embedded PostgreSQL via PGlite), Playwright (E2E) | `tests/` |
@@ -41,14 +41,27 @@ npm run dev                       # http://localhost:3000
 ```
 
 Sign up with any email and a 10+ character password (no email service is needed
-locally: password-reset links print to the server log). The mock optimiser
-rewrites deterministically and costs nothing. To use the real provider:
+locally: password-reset links print to the server log). The default `mock`
+provider is the built-in rule-based engine: no AI model, no cost.
+
+To use a free, open-source model on your own machine with
+[Ollama](https://ollama.com):
+
+```bash
+brew install ollama && ollama serve        # or install the Ollama app
+ollama pull qwen2.5:7b                     # ~4.7 GB; any chat model works
+```
 
 ```
-OPTIMISER_PROVIDER=openai
-OPENAI_API_KEY=sk-…
-OPTIMISER_MODEL=gpt-5-mini          # server-side only; verify current IDs/prices
+OPTIMISER_PROVIDER=open
+OPEN_MODEL=qwen2.5:7b
 ```
+
+The same setting works with LM Studio, vLLM, llama.cpp or a hosted service
+(Groq, OpenRouter, Together): set `OPEN_MODEL_BASE_URL` and `OPEN_MODEL_API_KEY`.
+If the model is unreachable, PromptIQ falls back to the rule-based engine. Full
+guide: [`docs/open-models.md`](docs/open-models.md). To use OpenAI instead, set
+`OPTIMISER_PROVIDER=openai`, `OPENAI_API_KEY` and `OPTIMISER_MODEL`.
 
 Useful commands:
 

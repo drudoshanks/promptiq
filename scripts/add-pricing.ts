@@ -5,6 +5,9 @@
  *     --source https://developers.openai.com/api/docs/models/gpt-5.4-mini \
  *     [--provider openai] [--effective-from 2026-11-01] [--version openai:gpt-5.4-mini:2026-11-01]
  *
+ * Hosted open-source model used as the optimiser (docs/open-models.md):
+ *   npm run pricing:add -- --provider open --model openai/gpt-oss-20b --input … --output … --source <url>
+ *
  * The model's current open-ended record (if any) is closed at --effective-from,
  * so historical estimates stay reproducible with the price they were made with.
  * Only enter rates you have checked against the provider's own pricing page.
@@ -36,10 +39,12 @@ async function main() {
   const model = arg("model");
   const source = arg("source");
   if (!model || !source) throw new Error("--model and --source are required");
-  if (!isSupportedModel(model)) throw new Error(`"${model}" is not in the supported model registry (src/lib/config/models.ts)`);
+  const provider = arg("provider") ?? "openai";
+  // The registry lists target models the Studio can count tokens for. An open
+  // model used as the optimiser only needs a price, so it is exempt.
+  if (provider !== "open" && !isSupportedModel(model)) throw new Error(`"${model}" is not in the supported model registry (src/lib/config/models.ts)`);
   const effectiveFrom = new Date(arg("effective-from") ?? new Date().toISOString().slice(0, 10));
   const cached = arg("cached");
-  const provider = arg("provider") ?? "openai";
 
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {

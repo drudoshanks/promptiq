@@ -18,7 +18,7 @@ import { normalisePrompt } from "@/lib/optimiser/normalise";
 import { resolvePreferences } from "@/lib/optimiser/preferences";
 import { savedPreferenceLines } from "@/lib/intelligence/saved-preferences";
 import { userKeyFor } from "@/lib/optimiser/service";
-import type { IntelligenceProvider, ProviderAttempt } from "@/lib/providers/types";
+import { isModelProvider, type IntelligenceProvider, type ProviderAttempt } from "@/lib/providers/types";
 
 import { analysePrompt, getLatestAnalysis, getOwnedSuggestions, providerFailure, serialiseAnalysis, serialiseSuggestion, summarise } from "./analysis";
 import { compareTexts, estimateText, recordApiUsage, recordTokenEstimate, summariseUsage, type TokenComparisonResult } from "./estimates";
@@ -540,7 +540,7 @@ export async function validateForUser(ctx: IntelligenceContext, input: { origina
 
   let semantic = null;
   const attempts: ProviderAttempt[] = [];
-  if (input.semantic && ctx.provider.name === "openai") {
+  if (input.semantic && isModelProvider(ctx.provider.name)) {
     await assertAnalysisQuotaAvailable(ctx.db, ctx.user);
     semantic = async (items: Array<{ id: string; text: string }>, text: string) => {
       const r = await ctx.provider.compareRequirements({ items, revised: text, requestId: ctx.requestId, userKey: userKeyFor(ctx.user.id) });

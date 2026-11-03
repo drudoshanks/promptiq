@@ -24,8 +24,21 @@ const schema = z.object({
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default("PromptIQ <no-reply@example.com>"),
 
-  OPTIMISER_PROVIDER: z.enum(["openai", "mock"]).default("mock"),
+  OPTIMISER_PROVIDER: z.enum(["open", "openai", "mock"]).default("mock"),
   OPENAI_API_KEY: z.string().optional(),
+  /**
+   * Open-source models through any OpenAI-compatible chat API: Ollama
+   * (default, http://localhost:11434/v1), LM Studio, vLLM, llama.cpp server,
+   * Groq, OpenRouter, Together and others. Used when OPTIMISER_PROVIDER=open.
+   */
+  OPEN_MODEL_BASE_URL: z.url().default("http://localhost:11434/v1"),
+  OPEN_MODEL_API_KEY: z.string().optional(),
+  OPEN_MODEL: z.string().min(1).default("qwen2.5:7b"),
+  /** json_schema (constrained output) or json_object for hosts without schema support. */
+  OPEN_MODEL_OUTPUT: z.enum(["json_schema", "json_object"]).default("json_schema"),
+  OPEN_MODEL_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(120_000),
+  /** "rules" falls back to the built-in rule-based engine when the model is unreachable. */
+  OPEN_MODEL_FALLBACK: z.enum(["rules", "none"]).default("rules"),
   OPTIMISER_MODEL: z.string().default("gpt-5-mini"),
   OPTIMISER_REASONING_EFFORT: z
     .enum(["none", "minimal", "low", "medium", "high", ""])

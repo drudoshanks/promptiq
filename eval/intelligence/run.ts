@@ -2,6 +2,7 @@
  * Prompt Intelligence evaluation (§15).
  *
  *   npm run eval:intelligence                         # local provider (deterministic)
+ *   OPTIMISER_PROVIDER=open OPEN_MODEL=qwen2.5:7b npm run eval:intelligence  # open model (Ollama etc.)
  *   OPTIMISER_PROVIDER=openai npm run eval:intelligence -- --live --limit 5
  *
  * For every case in eval/intelligence/dataset.json it measures, per generation
@@ -27,6 +28,7 @@ import { INTELLIGENCE_TEMPLATE_VERSION } from "../../src/lib/intelligence/instru
 import { scorePrompt } from "../../src/lib/intelligence/scorer";
 import type { GenerationMode } from "../../src/lib/intelligence/categories";
 import { MockOptimiserProvider } from "../../src/lib/providers/mock";
+import { OpenModelProvider } from "../../src/lib/providers/open-model";
 import { OpenAIOptimiserProvider } from "../../src/lib/providers/openai";
 import type { AiProvider } from "../../src/lib/providers/types";
 import { compareTokenCounts } from "../../src/lib/tokens";
@@ -58,6 +60,16 @@ function args() {
 }
 
 function provider(): AiProvider {
+  if (process.env.OPTIMISER_PROVIDER === "open") {
+    // No rule-based fallback here: the point is to measure the model itself.
+    return new OpenModelProvider({
+      baseUrl: process.env.OPEN_MODEL_BASE_URL ?? "http://localhost:11434/v1",
+      ...(process.env.OPEN_MODEL_API_KEY ? { apiKey: process.env.OPEN_MODEL_API_KEY } : {}),
+      modelId: process.env.OPEN_MODEL ?? "qwen2.5:7b",
+      timeoutMs: Number(process.env.OPEN_MODEL_TIMEOUT_MS ?? 120_000),
+      outputMode: process.env.OPEN_MODEL_OUTPUT === "json_object" ? "json_object" : "json_schema",
+    });
+  }
   if (process.env.OPTIMISER_PROVIDER !== "openai") return new MockOptimiserProvider();
   if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is required for OPTIMISER_PROVIDER=openai");
   return new OpenAIOptimiserProvider({ apiKey: process.env.OPENAI_API_KEY, modelId: process.env.OPTIMISER_MODEL ?? "gpt-5-mini", timeoutMs: 60_000, reasoningEffort: "low" });

@@ -1,6 +1,6 @@
 import { INTELLIGENCE_CONFIG } from "@/lib/config/intelligence";
 import { DEFAULT_TARGET_MODEL } from "@/lib/config/models";
-import type { IntelligenceProvider, ProviderAttempt, StructuredResult } from "@/lib/providers/types";
+import { isModelProvider, type IntelligenceProvider, type ProviderAttempt, type StructuredResult } from "@/lib/providers/types";
 import { countTokens } from "@/lib/tokens";
 
 import { isIntentCategory, type GenerationMode, type IntentCategory, type SuggestionKind } from "./categories";
@@ -193,7 +193,7 @@ export async function reviseText(input: RevisionInput): Promise<RevisionResult> 
   const template = templateFor(intent.task_type);
   const budget = input.tokenBudget && input.tokenBudget > 0 ? Math.round(input.tokenBudget) : null;
   const semantic: SemanticCompare | null =
-    input.provider.name === "openai"
+    isModelProvider(input.provider.name)
       ? async (items, revised) => unwrap(await input.provider.compareRequirements({ items, revised, requestId: input.requestId, userKey: input.userKey }), log).items
       : null;
   const validate = (candidate: string) => validatePreservation(input.text, candidate, { requirements, semantic });
