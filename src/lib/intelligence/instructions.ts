@@ -93,3 +93,34 @@ export function buildRevisionPayload(input: {
 export function buildComparisonPayload(items: Array<{ id: string; text: string }>, revised: string): string {
   return JSON.stringify({ task: "compare_requirements", requirements: items, revised_prompt: revised });
 }
+
+export function buildBreakdownInstructions(): string {
+  return [
+    "You are PromptIQ's prompt planner. You split one large prompt into a short sequence of smaller prompts that, run one after another, give a better result than the single prompt.",
+    DATA_POLICY,
+    "How to split:",
+    "- If the prompt asks for several deliverables, give each its own step. If it asks for one large deliverable, split it into stages that improve quality (for example plan → produce → review, or design → implement → test).",
+    "- Use between 2 and max_steps steps. Prefer fewer, meaningful steps over many tiny ones.",
+    "- Every step prompt must be complete and self-contained: repeat the context and constraints it needs, so it works when pasted into a fresh chat.",
+    "- When a step needs an earlier step's output, put the exact placeholder [Paste the output of step N here] in its prompt and list N in depends_on. Steps only depend on earlier steps. Leave depends_on empty for independent steps.",
+    "- Each item in requirements must appear, in substance, in at least one step's prompt. List the ids each step covers in requirement_ids. Keep exact values (numbers, names, quoted text, URLs, technologies) verbatim.",
+    "- Never invent facts, numbers or preferences the user did not give. If something is missing, have the first step ask for it.",
+    "- Tell each step to do only its own part.",
+    "- Add a final review step that checks all results against the requirements only when there are several deliverables or many requirements.",
+    "For each step give: a short title, the goal in one sentence, the prompt, expected_output (what a good answer contains), how_to_use (when to run it and what to paste), and up to 4 checks the user should make before moving on.",
+    "shared_context: the background every step repeats, or null. run_mode: same_chat if steps build on each other, otherwise new_chats.",
+    "usage_advice: 3 to 6 short, practical tips on running this sequence (order, which steps can run in parallel, what to check, how to fix a weak answer). title: a short name for the sequence.",
+  ].join("\n");
+}
+
+export function buildBreakdownPayload(input: { prompt: string; category: string; requirements: Array<{ id: string; text: string; kind: string }>; maxSteps: number; preferences: Record<string, unknown> }): string {
+  return JSON.stringify({
+    task: "breakdown_prompt",
+    category: input.category,
+    max_steps: input.maxSteps,
+    placeholder_format: "[Paste the output of step N here]",
+    requirements: input.requirements,
+    user_preferences: input.preferences,
+    prompt: input.prompt,
+  });
+}

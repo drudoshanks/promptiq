@@ -6,6 +6,8 @@ import { logger } from "@/lib/logger";
 import {
   buildAnalysisInstructions,
   buildAnalysisPayload,
+  buildBreakdownInstructions,
+  buildBreakdownPayload,
   buildComparisonInstructions,
   buildComparisonPayload,
   buildRevisionInstructions,
@@ -13,12 +15,15 @@ import {
 } from "@/lib/intelligence/instructions";
 import {
   modelAnalysisSchema,
+  modelBreakdownSchema,
   modelComparisonSchema,
   modelRevisionSchema,
   validateModelAnalysis,
+  validateModelBreakdown,
   validateModelComparison,
   validateModelRevision,
   type ModelAnalysis,
+  type ModelBreakdown,
   type ModelComparison,
   type ModelRevision,
 } from "@/lib/intelligence/schemas";
@@ -29,6 +34,7 @@ import { CircuitBreaker } from "./circuit-breaker";
 import {
   ProviderError,
   type AiProvider,
+  type BreakdownRequest,
   type ComparisonRequest,
   type IntentAnalysisRequest,
   type OptimiseRequest,
@@ -124,11 +130,13 @@ export class OpenModelProvider implements AiProvider {
   private readonly analysisInstructions = buildAnalysisInstructions();
   private readonly revisionInstructions = buildRevisionInstructions();
   private readonly comparisonInstructions = buildComparisonInstructions();
+  private readonly breakdownInstructions = buildBreakdownInstructions();
   private readonly formats = {
     optimise: formatFor(optimisationOutputSchema, "prompt_optimisation"),
     analyse: formatFor(modelAnalysisSchema, "prompt_analysis"),
     revise: formatFor(modelRevisionSchema, "prompt_revision"),
     compare: formatFor(modelComparisonSchema, "requirement_comparison"),
+    breakdown: formatFor(modelBreakdownSchema, "prompt_breakdown"),
   };
 
   constructor(options: OpenModelProviderOptions) {
@@ -176,6 +184,10 @@ export class OpenModelProvider implements AiProvider {
       maxOutputTokens: 1500,
       validate: validateModelComparison,
     });
+  }
+
+  breakdownPrompt(request: BreakdownRequest): Promise<StructuredResult<ModelBreakdown>> {
+    return this.call({ requestId: request.requestId, instructions: this.breakdownInstructions, input: buildBreakdownPayload(request), format: this.formats.breakdown, maxOutputTokens: 6000, validate: validateModelBreakdown });
   }
 
   private systemPrompt(instructions: string, format: Format): string {

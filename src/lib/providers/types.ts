@@ -1,7 +1,7 @@
 import type { TaskCategory } from "@/lib/categories";
 import type { UsageRecordStatus } from "@/lib/db/schema";
 import type { GenerationMode, SuggestionKind } from "@/lib/intelligence/categories";
-import type { ModelAnalysis, ModelComparison, ModelRevision, IntentRepresentation } from "@/lib/intelligence/schemas";
+import type { ModelAnalysis, ModelComparison, ModelRevision, IntentRepresentation, ModelBreakdown } from "@/lib/intelligence/schemas";
 import type { PromptTemplate } from "@/lib/intelligence/templates";
 import type { OptimiserMode } from "@/lib/optimiser/instructions";
 import type { OptimisationOutput } from "@/lib/optimiser/schema";
@@ -52,6 +52,16 @@ export interface RevisionRequest {
   restore: string[];
   preferences: Record<string, unknown>;
   questions: Array<{ key: string; question: string }>;
+  requestId: string;
+  userKey: string;
+}
+
+export interface BreakdownRequest {
+  prompt: string;
+  category: string;
+  requirements: Array<{ id: string; text: string; kind: string }>;
+  maxSteps: number;
+  preferences: Record<string, unknown>;
   requestId: string;
   userKey: string;
 }
@@ -127,6 +137,7 @@ export interface IntelligenceProvider {
   analyseIntent(request: IntentAnalysisRequest): Promise<StructuredResult<ModelAnalysis>>;
   revisePrompt(request: RevisionRequest): Promise<StructuredResult<ModelRevision>>;
   compareRequirements(request: ComparisonRequest): Promise<StructuredResult<ModelComparison>>;
+  breakdownPrompt(request: BreakdownRequest): Promise<StructuredResult<ModelBreakdown>>;
 }
 
 export type AiProvider = OptimiserProvider & IntelligenceProvider;

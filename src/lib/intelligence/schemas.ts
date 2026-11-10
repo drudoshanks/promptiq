@@ -62,6 +62,29 @@ export const modelComparisonSchema = z.object({
 });
 export type ModelComparison = z.infer<typeof modelComparisonSchema>;
 
+/** Model output for breaking one prompt into a sequence of smaller prompts. */
+export const modelBreakdownSchema = z.object({
+  title: z.string(),
+  shared_context: z.string().nullable(),
+  run_mode: z.enum(["same_chat", "new_chats"]),
+  steps: z.array(
+    z.object({
+      title: z.string(),
+      goal: z.string(),
+      prompt: z.string(),
+      depends_on: z.array(z.number().int()),
+      expected_output: z.string(),
+      how_to_use: z.string(),
+      checks: z.array(z.string()),
+      requirement_ids: z.array(z.string()),
+    }),
+  ),
+  usage_advice: z.array(z.string()),
+});
+export type ModelBreakdown = z.infer<typeof modelBreakdownSchema>;
+
+export const BREAKDOWN_LIMITS = { minSteps: 2, maxSteps: 8, maxStepChars: 8000 } as const;
+
 type Validation<T> = { ok: true; value: T } | { ok: false; reason: string };
 
 const clip = (s: string, max: number) => {
@@ -126,4 +149,37 @@ export function validateModelComparison(payload: unknown): Validation<ModelCompa
   const p = modelComparisonSchema.safeParse(payload);
   if (!p.success) return { ok: false, reason: reason(p.error) };
   return { ok: true, value: { items: p.data.items.slice(0, 60).map((i) => ({ ...i, note: i.note ? clip(i.note, 240) : null })) } };
+}
+
+/**
+ * Validate a model breakdown: 2–8 non-empty steps, dependencies only on
+ * earlier steps (numbered from 1), text clipped to sane lengths.
+ */
+export function validateModelBreakdown(payload: unknown): Validation<ModelBreakdown> {
+  const p = modelBreakdownSchema.safeParse(payload);
+  if (!p.success) return { ok: false, reason: reason(p.error) };
+  const v = p.data;
+  const steps = v.steps.filter((s) => s.prompt.trim());
+  if (steps.length < BREAKDOWN_LIMITS.minSteps) return { ok: false, reason: `needs at least ${BREAKDOWN_LIMITS.minSteps} steps` };
+  if (steps.length > BREAKDOWN_LIMITS.maxSteps) return { ok: false, reason: `at most ${BREAKDOWN_LIMITS.maxSteps} steps` };
+  if (steps.some((s) => s.prompt.length > BREAKDOWN_LIMITS.maxStepChars)) return { ok: false, reason: "a step prompt is too long" };
+  return {
+    ok: true,
+    value: {
+      title: clip(v.title, 120) || "Step-by-step prompts",
+      shared_context: v.shared_context?.trim() ? v.shared_context.trim().slice(0, 4000) : null,
+      run_mode: v.run_mode,
+      steps: steps.map((s, i) => ({
+        title: clip(s.title, 120) || `Step ${i + 1}`,
+        goal: clip(s.goal, 400),
+        prompt: s.prompt.trim(),
+        depends_on: [...new Set(s.depends_on.filter((d) => Number.isInteger(d) && d >= 1 && d <= i))].sort((a, b) => a - b),
+        expected_output: clip(s.expected_output, 400),
+        how_to_use: clip(s.how_to_use, 600),
+        checks: s.checks.map((c) => clip(c, 300)).filter(Boolean).slice(0, 6),
+        requirement_ids: [...new Set(s.requirement_ids.map((id) => id.trim()).filter(Boolean))].slice(0, 40),
+      })),
+      usage_advice: v.usage_advice.map((a) => clip(a, 400)).filter(Boolean).slice(0, 8),
+    },
+  };
 }

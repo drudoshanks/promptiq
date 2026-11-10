@@ -116,8 +116,13 @@ revisions, checks every requirement survived (repairing drops), and compares
 tokens and cost before saving a new version. Revisions apply your saved
 preferences (unless the prompt says otherwise), show a live token count as you
 type, and, when auto-save is on, store the original and first proposal in My
-prompts. Algorithms, API, data model and
-evaluation: [`docs/prompt-intelligence.md`](docs/prompt-intelligence.md).
+prompts. **Break into smaller prompts** splits a big request into a short
+sequence of self-contained step prompts. Each step comes with how to run it,
+what a good answer has, and checks before moving on. The sequence also has a
+run order (including which steps can run in parallel), usage advice, and a check
+that every requirement is carried by a step. Steps can be copied, downloaded as
+Markdown, or saved to My prompts as a tagged set. Algorithms, API, data model
+and evaluation: [`docs/prompt-intelligence.md`](docs/prompt-intelligence.md).
 Evaluate with `npm run eval:intelligence`.
 
 ## UPI payments (India)

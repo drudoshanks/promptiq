@@ -1,9 +1,10 @@
-import type { ModelAnalysis, ModelComparison, ModelRevision } from "@/lib/intelligence/schemas";
+import type { ModelAnalysis, ModelBreakdown, ModelComparison, ModelRevision } from "@/lib/intelligence/schemas";
 import { logger } from "@/lib/logger";
 
 import {
   ProviderError,
   type AiProvider,
+  type BreakdownRequest,
   type ComparisonRequest,
   type IntentAnalysisRequest,
   type OptimiseRequest,
@@ -64,5 +65,9 @@ export class FallbackProvider implements AiProvider {
 
   compareRequirements(request: ComparisonRequest): Promise<StructuredResult<ModelComparison>> {
     return this.run("compare", request.requestId, () => this.primary.compareRequirements(request), () => this.fallback.compareRequirements(request));
+  }
+
+  breakdownPrompt(request: BreakdownRequest): Promise<StructuredResult<ModelBreakdown>> {
+    return this.run("breakdown", request.requestId, () => this.primary.breakdownPrompt(request), () => this.fallback.breakdownPrompt(request));
   }
 }

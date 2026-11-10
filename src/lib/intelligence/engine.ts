@@ -1,15 +1,16 @@
 import { INTELLIGENCE_CONFIG } from "@/lib/config/intelligence";
 import { DEFAULT_TARGET_MODEL } from "@/lib/config/models";
-import { isModelProvider, type IntelligenceProvider, type ProviderAttempt, type StructuredResult } from "@/lib/providers/types";
+import { isModelProvider, ProviderError, type IntelligenceProvider, type ProviderAttempt, type StructuredResult } from "@/lib/providers/types";
 import { countTokens } from "@/lib/tokens";
 
 import { isIntentCategory, type GenerationMode, type IntentCategory, type SuggestionKind } from "./categories";
 import { classifyByRules, detectMissingInformation, withUserCategory, type Classification, type MissingInfo } from "./classifier";
 import { budgetAdvice, guardedCompress } from "./compress";
+import { assessBreakdown, ensureCoverage, fromModel, ruleBreakdown, type BreakdownAssessment, type BreakdownPlan, type CoverageItem } from "./breakdown";
 import { INTELLIGENCE_TEMPLATE_VERSION } from "./instructions";
 import type { RankingContext } from "./ranking";
 import { extractRequirements, validatePreservation, type PreservationReport, type Requirement, type SemanticCompare } from "./requirements";
-import type { IntentRepresentation, ModelAnalysis } from "./schemas";
+import { BREAKDOWN_LIMITS, type IntentRepresentation, type ModelAnalysis } from "./schemas";
 import { scorePrompt, SCORE_NOTE, type CompletenessScore } from "./scorer";
 import { buildIntent, defaultAssumptions } from "./structure";
 import { buildSuggestions, type EngineSuggestion } from "./suggestions";
@@ -306,4 +307,88 @@ export async function reviseText(input: RevisionInput): Promise<RevisionResult> 
 export function quickClassification(text: string, override?: IntentCategory | null): Classification {
   const rules = classifyByRules(text);
   return override ? withUserCategory(rules, override, text) : rules;
+}
+
+// ---------------------------------------------------------------------------
+// Breakdown into smaller prompts
+// ---------------------------------------------------------------------------
+export interface BreakdownInput {
+  text: string;
+  classification: Classification;
+  targetModel: string;
+  provider: IntelligenceProvider;
+  preferences: Record<string, unknown>;
+  requestId: string;
+  userKey: string;
+}
+
+export interface BreakdownResult {
+  plan: BreakdownPlan;
+  assessment: BreakdownAssessment;
+  requirements: Requirement[];
+  coverage: CoverageItem[];
+  engine: "model" | "rules";
+  /** Why the rule-based splitter was used although a model is configured. */
+  fallback_reason: string | null;
+  tokens: { original: number; steps: number[]; total: number };
+  attempts: ProviderAttempt[];
+}
+
+const RULES_MODEL_ID = "mock-optimiser";
+
+/**
+ * Split a prompt into a sequence of smaller prompts. A model plan is
+ * normalised and coverage-checked; if the model is unavailable or its answer
+ * is unusable, the rule-based splitter answers instead (refusals are surfaced).
+ */
+export async function breakdownText(input: BreakdownInput): Promise<BreakdownResult> {
+  const { text, classification, provider } = input;
+  const requirements = extractRequirements(text);
+  const assessment = assessBreakdown(text, requirements, classification);
+  const rules = () => ruleBreakdown(text, requirements, classification);
+  const log = new AttemptLog();
+  let plan: BreakdownPlan;
+  let engine: BreakdownResult["engine"] = "rules";
+  let fallback: string | null = null;
+  try {
+    const result = await provider.breakdownPrompt({
+      prompt: text,
+      category: classification.primary,
+      requirements: requirements.map((r) => ({ id: r.id, text: r.text, kind: r.kind })),
+      maxSteps: BREAKDOWN_LIMITS.maxSteps,
+      preferences: input.preferences,
+      requestId: input.requestId,
+      userKey: input.userKey,
+    });
+    log.add(result.attempts);
+    if (result.kind === "refused") throw new EngineProviderError("refused", result.reason, log.attempts);
+    if (result.kind !== "ok") {
+      plan = rules();
+      fallback = result.kind === "incomplete" ? "The model's answer was cut off, so the built-in rules made this breakdown." : "The model's answer couldn't be used, so the built-in rules made this breakdown.";
+    } else if (provider.name === "mock" || result.modelId === RULES_MODEL_ID) {
+      plan = rules();
+      if (isModelProvider(provider.name)) fallback = "The AI model was unavailable, so the built-in rules made this breakdown.";
+    } else {
+      plan = fromModel(result.output, requirements, classification.primary);
+      engine = "model";
+    }
+  } catch (error) {
+    if (!(error instanceof ProviderError)) throw error;
+    log.add(error.attempts);
+    plan = rules();
+    fallback = "The AI service was unavailable, so the built-in rules made this breakdown.";
+  }
+  const coverage = await ensureCoverage(text, plan, requirements);
+  const count = (t: string) => countTokens(t, input.targetModel).token_count;
+  const steps = plan.steps.map((s) => count(s.prompt));
+  return {
+    plan,
+    assessment,
+    requirements,
+    coverage,
+    engine,
+    fallback_reason: fallback,
+    tokens: { original: count(text), steps, total: steps.reduce((a, b) => a + b, 0) },
+    attempts: log.attempts,
+  };
 }

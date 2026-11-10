@@ -230,7 +230,7 @@ describe("token-aware optimisation (§7)", () => {
   it("does not call a model when the deterministic token saver is enough", async () => {
     const text = "Please write a haiku about autumn. Please write a haiku about autumn.";
     let calls = 0;
-    const spy: IntelligenceProvider = { ...mock, name: "mock", modelId: "spy", analyseIntent: mock.analyseIntent.bind(mock), compareRequirements: mock.compareRequirements.bind(mock), revisePrompt: async (r) => (calls++, mock.revisePrompt(r)) };
+    const spy: IntelligenceProvider = { ...mock, name: "mock", modelId: "spy", analyseIntent: mock.analyseIntent.bind(mock), compareRequirements: mock.compareRequirements.bind(mock), breakdownPrompt: mock.breakdownPrompt.bind(mock), revisePrompt: async (r) => (calls++, mock.revisePrompt(r)) };
     const r = await reviseText({ ...base, text, mode: "token_saver", classification: classifyByRules(text), targetModel: "gpt-5-mini", provider: spy });
     expect(calls).toBe(0);
     expect(r.engine).toBe("local");
@@ -255,6 +255,7 @@ describe("generate → validate → repair loop (§6, §8)", () => {
       modelId: "fake",
       analyseIntent: mock.analyseIntent.bind(mock),
       compareRequirements: mock.compareRequirements.bind(mock),
+      breakdownPrompt: mock.breakdownPrompt.bind(mock),
       revisePrompt: (r) => {
         requests.push(r);
         return ok({ revised_prompt: r.restore.length ? `Write a 500 words article about solar panels for homeowners. ${r.restore.join(" ")}` : "Write a 500 words article about solar panels for homeowners." });
@@ -269,7 +270,7 @@ describe("generate → validate → repair loop (§6, §8)", () => {
   });
 
   it("re-adds requirements verbatim and flags it when the model keeps dropping them", async () => {
-    const provider: IntelligenceProvider = { name: "mock", modelId: "fake", analyseIntent: mock.analyseIntent.bind(mock), compareRequirements: mock.compareRequirements.bind(mock), revisePrompt: () => ok({ revised_prompt: "Write an article about solar panels for homeowners." }) };
+    const provider: IntelligenceProvider = { name: "mock", modelId: "fake", analyseIntent: mock.analyseIntent.bind(mock), compareRequirements: mock.compareRequirements.bind(mock), breakdownPrompt: mock.breakdownPrompt.bind(mock), revisePrompt: () => ok({ revised_prompt: "Write an article about solar panels for homeowners." }) };
     const r = await reviseText({ ...base, text, mode: "quality_first", classification: classifyByRules(text), targetModel: "gpt-5-mini", provider, maxIterations: 2 });
     expect(r.repaired).toBe(true);
     expect(r.revised_prompt).toContain("Also required:");
@@ -278,7 +279,7 @@ describe("generate → validate → repair loop (§6, §8)", () => {
   });
 
   it("surfaces a refusal with every attempt for usage accounting", async () => {
-    const provider: IntelligenceProvider = { name: "mock", modelId: "fake", analyseIntent: mock.analyseIntent.bind(mock), compareRequirements: mock.compareRequirements.bind(mock), revisePrompt: async () => ({ kind: "refused", reason: "no", modelId: "fake", attempts: [{ attempt: 1, status: "refused", modelId: "fake", usage: { inputTokens: 3, outputTokens: 1, totalTokens: 4, cachedInputTokens: 0 } }] }) };
+    const provider: IntelligenceProvider = { name: "mock", modelId: "fake", analyseIntent: mock.analyseIntent.bind(mock), compareRequirements: mock.compareRequirements.bind(mock), breakdownPrompt: mock.breakdownPrompt.bind(mock), revisePrompt: async () => ({ kind: "refused", reason: "no", modelId: "fake", attempts: [{ attempt: 1, status: "refused", modelId: "fake", usage: { inputTokens: 3, outputTokens: 1, totalTokens: 4, cachedInputTokens: 0 } }] }) };
     await expect(reviseText({ ...base, text, mode: "detailed", classification: classifyByRules(text), targetModel: "gpt-5-mini", provider })).rejects.toMatchObject({ kind: "refused", attempts: [{ status: "refused" }] });
     expect(EngineProviderError).toBeDefined();
   });

@@ -240,6 +240,28 @@ export const intelligenceAnalyseSchema = z
   .strict()
   .refine(needsSource, sourceMessage);
 
+export const intelligenceBreakdownSchema = z
+  .object({
+    ...intelligenceSource,
+    category: z.enum(INTENT_CATEGORIES).nullable().optional(),
+    target_model: z.string().max(100).nullable().optional(),
+  })
+  .strict()
+  .refine(needsSource, sourceMessage);
+
+export const breakdownSaveSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120),
+    category: z.enum(INTENT_CATEGORIES),
+    target_model: z.string().max(100).nullable().optional(),
+    breakdown_id: uuid.nullable().optional(),
+    steps: z
+      .array(z.object({ title: z.string().trim().min(1).max(120), prompt: z.string().min(1).max(8000), how_to_use: z.string().max(600).nullable().optional() }).strict())
+      .min(1)
+      .max(8),
+  })
+  .strict();
+
 export const intelligenceReviseSchema = z
   .object({
     ...intelligenceSource,
