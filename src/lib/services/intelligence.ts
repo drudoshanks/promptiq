@@ -12,13 +12,14 @@ import { INTENT_LABELS, SUGGESTION_KIND_LABELS, TO_TASK_CATEGORY, toSuggestionKi
 import type { Classification } from "@/lib/intelligence/classifier";
 import { analyseText, quickClassification, reviseText, type AnalysisResult, type RevisionResult } from "@/lib/intelligence/engine";
 import { INTELLIGENCE_TEMPLATE_VERSION } from "@/lib/intelligence/instructions";
-import { compactReport, REQUIREMENT_KIND_LABELS, validatePreservation, type PreservationReport } from "@/lib/intelligence/requirements";
+import { assessBreakdown } from "@/lib/intelligence/breakdown";
+import { compactReport, extractRequirements, REQUIREMENT_KIND_LABELS, validatePreservation, type PreservationReport } from "@/lib/intelligence/requirements";
 import type { RequestLogger } from "@/lib/logger";
 import { normalisePrompt } from "@/lib/optimiser/normalise";
 import { resolvePreferences } from "@/lib/optimiser/preferences";
 import { savedPreferenceLines } from "@/lib/intelligence/saved-preferences";
 import { userKeyFor } from "@/lib/optimiser/service";
-import type { IntelligenceProvider, ProviderAttempt } from "@/lib/providers/types";
+import { isModelProvider, type IntelligenceProvider, type ProviderAttempt } from "@/lib/providers/types";
 
 import { analysePrompt, getLatestAnalysis, getOwnedSuggestions, providerFailure, serialiseAnalysis, serialiseSuggestion, summarise } from "./analysis";
 import { compareTexts, estimateText, recordApiUsage, recordTokenEstimate, summariseUsage, type TokenComparisonResult } from "./estimates";
@@ -41,7 +42,7 @@ export interface IntelligenceContext {
   globalDailySpendCapUsd: number;
 }
 
-type Source = { text: string; promptId?: undefined } | { promptId: string; versionId?: string | null; text?: string | null };
+export type Source = { text: string; promptId?: undefined } | { promptId: string; versionId?: string | null; text?: string | null };
 
 interface ResolvedSource {
   text: string;
@@ -51,7 +52,7 @@ interface ResolvedSource {
   targetModel: string | null;
 }
 
-async function resolveSource(ctx: IntelligenceContext, source: Source): Promise<ResolvedSource> {
+export async function resolveSource(ctx: IntelligenceContext, source: Source): Promise<ResolvedSource> {
   const plan = planFor(ctx.user.planCode);
   let resolved: ResolvedSource;
   if (source.promptId) {
@@ -72,13 +73,13 @@ async function resolveSource(ctx: IntelligenceContext, source: Source): Promise<
   return resolved;
 }
 
-function resolveModel(requested: string | null | undefined, fallback: string | null): string {
+export function resolveModel(requested: string | null | undefined, fallback: string | null): string {
   const model = requested ?? fallback ?? DEFAULT_TARGET_MODEL;
   if (!isSupportedModel(model)) throw new AppError("UNSUPPORTED_MODEL", `Token counts are not available for model "${model}". Choose a supported model.`);
   return model;
 }
 
-async function assertSpendCap(ctx: IntelligenceContext) {
+export async function assertSpendCap(ctx: IntelligenceContext) {
   if (ctx.globalDailySpendCapUsd > 0 && (await globalSpendTodayUsd(ctx.db)) >= ctx.globalDailySpendCapUsd) {
     throw new AppError("SPEND_CAP_REACHED", "AI features are temporarily paused. Please try again later.");
   }
@@ -146,7 +147,7 @@ export async function analyseForUser(ctx: IntelligenceContext, input: AnalyseInt
   return presentFresh(result, src, tokens, reused);
 }
 
-async function recordAdhocUsage(ctx: IntelligenceContext, operationId: string, attempts: ProviderAttempt[], requestType: string) {
+export async function recordAdhocUsage(ctx: IntelligenceContext, operationId: string, attempts: ProviderAttempt[], requestType: string) {
   const rows = [];
   for (const a of attempts) {
     const r = await recordApiUsage(ctx.db, {
@@ -200,6 +201,7 @@ function presentFresh(result: AnalysisResult, src: ResolvedSource, tokens: Await
     intent: result.intent,
     suggestions: result.suggestions.map((s) => ({ ...s, status: "pending" as const, persisted: false })),
     already_well_optimised: result.already_well_optimised,
+    breakdown: assessBreakdown(src.text, result.requirements, result.classification),
     summary: summarise(result),
     token_estimate: tokens,
     model_used: result.model_used,
@@ -238,6 +240,7 @@ function presentStored(
     intent: fresh?.intent ?? null,
     suggestions: stored.suggestions.map((s) => ({ ...serialiseSuggestion(s), persisted: true })),
     already_well_optimised: a.already_well_optimised,
+    breakdown: assessBreakdown(versionText, extractRequirements(versionText), { ...c, ...classification }),
     summary: a.summary,
     token_estimate: tokens,
     model_used: a.model_used,
@@ -540,7 +543,7 @@ export async function validateForUser(ctx: IntelligenceContext, input: { origina
 
   let semantic = null;
   const attempts: ProviderAttempt[] = [];
-  if (input.semantic && ctx.provider.name === "openai") {
+  if (input.semantic && isModelProvider(ctx.provider.name)) {
     await assertAnalysisQuotaAvailable(ctx.db, ctx.user);
     semantic = async (items: Array<{ id: string; text: string }>, text: string) => {
       const r = await ctx.provider.compareRequirements({ items, revised: text, requestId: ctx.requestId, userKey: userKeyFor(ctx.user.id) });

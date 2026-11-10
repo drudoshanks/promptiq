@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, Download, PencilLine, RotateCcw, Sparkles, Wand2, X } from "lucide-react";
+import { Check, Copy, Download, Layers, PencilLine, RotateCcw, Sparkles, Undo2, Wand2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
@@ -19,9 +19,11 @@ import type { ModelOption } from "@/lib/client/estimates";
 import { DEFAULT_OUTPUT_PRESET, type OutputLengthPreset } from "@/lib/config/estimates";
 import { GENERATION_MODE_LABELS, GENERATION_MODES, INTENT_CATEGORIES, INTENT_LABELS, TO_TASK_CATEGORY, type GenerationMode, type IntentCategory } from "@/lib/intelligence/categories";
 import { formatMoney } from "@/lib/money";
+import type { IntelligenceBreakdown } from "@/lib/services/breakdown";
 import type { IntelligenceAnalysis, IntelligenceRevision } from "@/lib/services/intelligence";
 import { cx, formatNumber } from "@/lib/utils";
 
+import { BreakdownHint, BreakdownPanel } from "./breakdown-panel";
 import { PreservationPanel, PRESERVATION_BADGE, type PreservationView } from "./preservation-panel";
 import { RubricBar } from "./rubric-bar";
 
@@ -93,7 +95,13 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
   const [view, setView] = useState<"side" | "diff">("side");
   const [mobilePane, setMobilePane] = useState<"original" | "proposed">("proposed");
 
-  const [busy, setBusy] = useState<null | "analyse" | "detailed" | "optimise" | "apply" | "again" | "validate" | "save">(null);
+  const [busy, setBusy] = useState<null | "analyse" | "detailed" | "optimise" | "apply" | "again" | "validate" | "save" | "breakdown">(null);
+  const [breakdown, setBreakdown] = useState<IntelligenceBreakdown | null>(null);
+  const [breakdownText, setBreakdownText] = useState<string | null>(null);
+  /** Set while a step of the breakdown is in the editor, so the original prompt can be restored. */
+  const [stepInEditor, setStepInEditor] = useState<{ original: string; step: number; title: string } | null>(null);
+  const breakdownHeadingRef = useRef<HTMLHeadingElement>(null);
+  const inputRef = useRef<HTMLElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -196,6 +204,32 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
     if (result) pushRevision(result, new Set());
   }
 
+  async function breakDown() {
+    const result = await run("breakdown", () =>
+      api<IntelligenceBreakdown>("/api/v1/prompt-intelligence/breakdown", { method: "POST", body: { ...source(), category: category === "auto" ? (analysis?.classification.primary ?? null) : category, target_model: model } }),
+    );
+    if (!result) return;
+    setBreakdown(result);
+    setBreakdownText(text);
+    requestAnimationFrame(() => {
+      breakdownHeadingRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      breakdownHeadingRef.current?.focus({ preventScroll: true });
+    });
+  }
+
+  function putStepInEditor(step: IntelligenceBreakdown["steps"][number], stepPrompt: string) {
+    setStepInEditor((current) => ({ original: current?.original ?? text, step: step.number, title: step.title }));
+    setText(stepPrompt);
+    setAnalysis(null);
+    requestAnimationFrame(() => inputRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
+  function restoreOriginal() {
+    if (!stepInEditor) return;
+    setText(stepInEditor.original);
+    setStepInEditor(null);
+  }
+
   async function setSuggestionStatus(s: Suggestion, status: Exclude<Status, "applied">) {
     const previous = statuses[s.id];
     setStatuses((m) => ({ ...m, [s.id]: status }));
@@ -264,7 +298,7 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
         <header className="max-w-3xl">
           <h1>Studio</h1>
           <p className="mt-2 text-ink-soft">
-            Write or paste a prompt. Analyse it to see what is missing, then optimise it in the mode you choose. Every requirement you wrote is checked in the result, with token and cost figures before you use it.
+            Write or paste a prompt. Analyse it to see what is missing, then optimise it in the mode you choose, or break a big prompt into smaller step-by-step prompts. Every requirement you wrote is checked in the result, with token and cost figures before you use it.
           </p>
           {studio ? (
             <div className="mt-3 flex flex-wrap gap-2 text-sm">
@@ -288,13 +322,24 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         {/* Input */}
-        <section aria-labelledby="input-heading" className="panel h-fit p-5 xl:sticky xl:top-6">
+        <section ref={inputRef} aria-labelledby="input-heading" className="panel h-fit scroll-mt-6 p-5 xl:sticky xl:top-6">
           <div className="flex items-center justify-between gap-2">
             <h2 id="input-heading" className="text-lg">
               {prompt ? `Version ${prompt.versionNumber}` : "Your prompt"}
             </h2>
             {prompt && !textIsSaved ? <Badge tone="warn">Edited, not saved</Badge> : null}
           </div>
+          {stepInEditor ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-accent-faint px-3 py-2 text-sm" role="status">
+              <span>
+                Step {stepInEditor.step} ({stepInEditor.title}) is in the editor. Analyse or optimise it like any prompt.
+              </span>
+              <Button size="sm" variant="ghost" onClick={restoreOriginal}>
+                <Undo2 className="h-4 w-4" aria-hidden="true" />
+                Back to your original prompt
+              </Button>
+            </div>
+          ) : null}
           <Field label="Prompt" className="mt-3">
             {(p) => <Textarea id={p.id} value={text} onChange={(e) => setText(e.target.value)} rows={embedded ? 7 : 10} placeholder="For example: Build an ecommerce website for my bakery" spellCheck />}
           </Field>
@@ -360,7 +405,12 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
             <Button className="sm:col-span-2" variant="primary" onClick={() => revise("optimise", mode)} loading={busy === "optimise"} disabled={!canRun || (mode === "custom" && !objective.trim())}>
               Optimise prompt
             </Button>
+            <Button className="whitespace-normal sm:col-span-2" variant="secondary" onClick={breakDown} loading={busy === "breakdown"} disabled={!canRun}>
+              <Layers className="h-4 w-4" aria-hidden="true" />
+              Break into smaller prompts
+            </Button>
           </div>
+          <p className="field-help mt-2">Break down turns one big request into a sequence of focused prompts, with advice on how to run them.</p>
           <LiveTokenCount text={text} model={model} maxChars={studio?.maxPromptChars} />
         </section>
 
@@ -403,6 +453,7 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
                     {analysis.classification.objective}
                   </p>
                 ) : null}
+                {analysis.breakdown && !stale ? <BreakdownHint level={analysis.breakdown.level} headline={analysis.breakdown.headline} reasons={analysis.breakdown.reasons} onBreakdown={breakDown} busy={busy === "breakdown"} /> : null}
                 <div className="mt-5">
                   <RubricBar overall={analysis.score.overall} dimensions={analysis.score.dimensions as never} note={analysis.score.note} />
                 </div>
@@ -762,6 +813,16 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
           </div>
           <p className="mt-3 text-[0.8125rem] text-ink-faint">The original is never overwritten. A more detailed or a shorter prompt is not guaranteed to produce a better answer; try it on your real task.</p>
         </section>
+      ) : null}
+      {breakdown ? (
+        <div className="space-y-2">
+          {breakdownText !== null && breakdownText !== text && !stepInEditor ? (
+            <Alert tone="warning" action={<Button size="sm" onClick={breakDown} loading={busy === "breakdown"} disabled={!canRun}>Break down the edited prompt</Button>}>
+              Your prompt has changed since these steps were made.
+            </Alert>
+          ) : null}
+          <BreakdownPanel key={breakdown.breakdown_id} breakdown={breakdown} targetModel={model} onUseStep={putStepInEditor} headingRef={breakdownHeadingRef} />
+        </div>
       ) : null}
       {revision ? (
         <SaveExportDialog

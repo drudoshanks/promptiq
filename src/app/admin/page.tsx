@@ -7,6 +7,7 @@ import { formatUsd } from "@/lib/cost";
 import { db } from "@/lib/db/client";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { configuredModelId } from "@/lib/providers";
 import { getAdminMetrics } from "@/lib/services/admin";
 import { formatDateTime, formatNumber } from "@/lib/utils";
 
@@ -32,7 +33,7 @@ export default async function AdminPage() {
         <div>
           <h1>Operations</h1>
           <p className="mt-2 text-ink-soft">
-            Aggregate health and cost. Generated {formatDateTime(metrics.generated_at)}. Provider: {env.OPTIMISER_PROVIDER} ({env.OPTIMISER_MODEL}); daily spend cap {formatUsd(env.GLOBAL_DAILY_SPEND_CAP_USD, 2)}.
+            Aggregate health and cost. Generated {formatDateTime(metrics.generated_at)}. Provider: {env.OPTIMISER_PROVIDER} ({configuredModelId()}); daily spend cap {formatUsd(env.GLOBAL_DAILY_SPEND_CAP_USD, 2)}.
           </p>
         </div>
 

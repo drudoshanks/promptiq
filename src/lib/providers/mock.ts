@@ -1,13 +1,15 @@
 import { isTaskCategory, type TaskCategory } from "@/lib/categories";
+import { ruleBreakdown, toModelShape } from "@/lib/intelligence/breakdown";
+import { isIntentCategory } from "@/lib/intelligence/categories";
 import { classifyByRules } from "@/lib/intelligence/classifier";
 import { extractRequirements } from "@/lib/intelligence/requirements";
-import type { ModelAnalysis, ModelComparison, ModelRevision } from "@/lib/intelligence/schemas";
+import type { ModelAnalysis, ModelBreakdown, ModelComparison, ModelRevision } from "@/lib/intelligence/schemas";
 import { renderPrompt } from "@/lib/intelligence/structure";
 import { clauses, similarity } from "@/lib/intelligence/text";
 import type { OptimisationOutput } from "@/lib/optimiser/schema";
 import { approximateTokens } from "@/lib/tokens";
 
-import type { AiProvider, ComparisonRequest, IntentAnalysisRequest, OptimiseRequest, OptimiseResult, ProviderAttempt, RevisionRequest, StructuredResult } from "./types";
+import type { AiProvider, BreakdownRequest, ComparisonRequest, IntentAnalysisRequest, OptimiseRequest, OptimiseResult, ProviderAttempt, RevisionRequest, StructuredResult } from "./types";
 
 const CATEGORY_HINTS: Array<[TaskCategory, RegExp]> = [
   ["coding", /\b(code|function|bug|error|typescript|python|javascript|sql|api|regex|compile|refactor|unit test)\b/i],
@@ -101,6 +103,15 @@ export class MockOptimiserProvider implements AiProvider {
     if (request.restore.length) improvements.push(`Restored ${request.restore.length} requirement${request.restore.length > 1 ? "s" : ""} an earlier draft dropped.`);
     const output: ModelRevision = { revised_prompt: text, key_improvements: improvements, assumptions_introduced: request.intent.assumptions, clarification_questions: request.questions.filter((q) => request.intent.missing_information.includes(q.key)).map((q) => q.question) };
     return { kind: "ok", output, modelId: this.modelId, attempts: this.attempt(approximateTokens(request.prompt) + 900, approximateTokens(text) + 80) };
+  }
+
+  /** The rule-based splitter, in the model-output shape. */
+  async breakdownPrompt(request: BreakdownRequest): Promise<StructuredResult<ModelBreakdown>> {
+    await this.wait();
+    const rules = classifyByRules(request.prompt);
+    const classification = isIntentCategory(request.category) ? { ...rules, primary: request.category } : rules;
+    const output = toModelShape(ruleBreakdown(request.prompt, extractRequirements(request.prompt), classification));
+    return { kind: "ok", output, modelId: this.modelId, attempts: this.attempt(approximateTokens(request.prompt) + 1100, output.steps.reduce((n, s) => n + approximateTokens(s.prompt) + 60, 0)) };
   }
 
   /** Lenient wording comparison standing in for the semantic check. */

@@ -180,6 +180,33 @@ test("prompt intelligence: detailed and token-saver versions with requirement ch
   await expect(page.getByText("Tokens saved").first()).toBeVisible();
 });
 
+test("break down: a big prompt becomes step-by-step prompts with advice, saved to the library", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/app/studio");
+  await page.getByLabel("Prompt", { exact: true }).fill(
+    "We are a two-person design studio in Bengaluru.\nWrite a case study about our café rebrand, then create a LinkedIn post promoting the case study, and draft a cold email to restaurant owners that links to it.\nKeep a confident but humble tone. Don't name the client.",
+  );
+  await page.getByRole("button", { name: "Analyse prompt" }).click();
+  const hint = page.getByTestId("breakdown-hint");
+  await expect(hint).toContainText("likely give you a better result");
+  await hint.getByRole("button", { name: "Break it down" }).click();
+
+  const panel = page.getByTestId("breakdown");
+  await expect(panel.getByRole("heading", { name: /Write a case study, create a LinkedIn post and draft a cold email/ })).toBeVisible();
+  await expect(panel.getByRole("list", { name: "Steps" }).getByRole("heading", { level: 3 })).toHaveText(["Write a case study", "Create a LinkedIn post", "Draft a cold email", "Check everything against your requirements"]);
+  await expect(panel.getByText("[Paste the output of step 1 here]").first()).toBeVisible();
+  await expect(panel.getByText(/Run the steps in this order: 1 → \(2 \+ 3\) → 4/)).toBeVisible();
+  await expect(panel.getByText(/requirements? (is|are) carried by at least one step/)).toBeVisible();
+
+  await panel.getByRole("checkbox", { name: "I've run this step" }).first().check();
+  await expect(panel.getByText("1 of 4 done")).toBeVisible();
+  await panel.getByRole("button", { name: "Save steps to My prompts" }).click();
+  await panel.getByRole("link", { name: "View 4 saved steps" }).click();
+  await page.waitForURL(/\/app\/library\?tag=steps-/);
+  await expect(page.getByRole("link", { name: /^1\/4 Write a case study/ }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: /^4\/4 Check everything/ }).first()).toBeVisible();
+});
+
 test("UPI: pay by QR, submit the UTR, an administrator verifies, and Pro activates", async ({ page, browser }) => {
   const adminEmail = process.env.E2E_ADMIN_EMAIL;
   const adminPassword = process.env.E2E_ADMIN_PASSWORD;

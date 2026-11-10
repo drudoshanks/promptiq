@@ -52,6 +52,64 @@ the user chooses to.
   the library is full, nothing is saved and `auto_save_skipped` is
   `"library_full"`. Clients can opt out per request with `auto_save: false`.
 
+### Break into smaller prompts
+
+A big request (several deliverables, many requirements, or a large build) often
+gets a better result as a short sequence of focused prompts. **Break into
+smaller prompts** in the Studio (or **Break it down** on the analysis hint)
+returns:
+
+- **Assessment:** `single`, `optional` or `recommended`, with reasons such as
+  several deliverables, later parts building on earlier ones, length, the number
+  of requirements, mixed kinds of work, or a software build. Every analysis
+  includes it as `breakdown`, and the Studio shows a hint when splitting is
+  optional or recommended.
+- **Steps** (2–8): title, goal, a self-contained prompt, dependencies, expected
+  output, how to use it, and checks before moving on. When a step needs an
+  earlier result, its prompt contains the exact placeholder
+  `[Paste the output of step N here]`.
+- **Run order:** steps grouped by dependency level. Steps on the same level
+  don't depend on each other and can run in any order.
+- **Usage advice:** order, same chat or new chats, review checkpoints, context
+  repetition, and a tip for the task type.
+- **Coverage:** which step carries each requirement. Anything missing is added
+  under "Also make sure:" (to every step for tone, restrictions and "in every
+  piece" rules) and reported as `added`.
+
+**How the rule-based splitter works** (`src/lib/intelligence/breakdown.ts`):
+
+1. Clauses are split as for requirement extraction. A clause starting with an
+   action verb ("write", "create", "draft", "build" …, after politeness and
+   "then/also/finally") starts a task. "A, then B, and C" is split into tasks
+   when each part has at least three words.
+2. Clauses before the first task are **context** and are repeated in every
+   step. A tone, restriction or "every/all/each" rule after the last of several
+   tasks applies to **all** steps. Other clauses refine the task before them.
+3. **Dependencies:** a task uses an earlier one when it names that task's
+   object ("the post", "this case study"), refers back ("based on the outline",
+   "the above"), or uses a pronoun ("announcing it", "turn it into"). With
+   "then …" a pronoun means the previous step; otherwise it means the main
+   (longest) deliverable.
+4. **Two or more tasks:** one step per task (neighbours are merged above 7),
+   plus a final review step when there are at least 4 requirements.
+   **One task:** stages for its category: software (approach → implement →
+   test), writing (outline → draft → edit), research (questions → analyse →
+   write up), planning (goals → plan → risks), or general. A short prompt
+   (under 30 words, at most 3 requirements) gets options → refine. Later
+   stages restate the goal so they work in a fresh chat.
+
+**Model plans:** with a model provider, the model gets the prompt, the
+requirement list (with IDs), `max_steps` and the placeholder format, and returns
+`modelBreakdownSchema`. The server then:
+
+- validates the plan (2–8 steps, dependencies only on earlier steps);
+- normalises placeholders, adds dependencies the prompt text implies, and puts
+  the shared context into any step that lacks it;
+- runs the same coverage repair as for rule-based plans.
+
+If the model is unavailable, cut off or invalid, the rule-based splitter
+answers and `fallback_reason` says so. Refusals are shown as errors.
+
 ## Modules
 
 The modules live in `src/lib/intelligence/` (storage-free and unit-tested); the
@@ -65,6 +123,7 @@ service layer is `src/lib/services/intelligence.ts`.
 | PromptSuggestionEngine | `suggestions.ts`: rule suggestions merged with model suggestions. |
 | PromptOptimisationEngine | `compress.ts` (guarded deterministic pipeline) and `engine.ts` (generate → validate → repair loop). |
 | RequirementPreservationValidator | `requirements.ts`. |
+| Breakdown planner | `breakdown.ts` (assessment, rule-based splitter, model-plan normalisation, coverage repair, advice); `breakdownText` in `engine.ts`; service `src/lib/services/breakdown.ts`. |
 | TokenEstimator / CostEstimator | The existing `src/lib/tokens.ts` and `services/estimates.ts` (`compareTexts`). No LLM is called to count tokens. |
 | FeedbackRankingService | `ranking.ts`, with counts from `services/prompt-preferences.ts#getRankingContext`. |
 
@@ -342,6 +401,8 @@ limits, and use the standard envelope and error codes.
 | `POST /api/v1/prompt-intelligence/generate` | Revision, default mode `detailed`. | 8/min |
 | `POST /api/v1/prompt-intelligence/optimise` | Revision, default mode is the user's preferred mode; `token_budget` optional. | 8/min |
 | `POST /api/v1/prompt-intelligence/validate` | Requirement check and token comparison for an edited revision. | 30/min |
+| `POST /api/v1/prompt-intelligence/breakdown` | Split a prompt (`prompt_text`, or `prompt_id` + `version_id`; optional `category`, `target_model`) into step prompts with run order, advice, coverage and per-step token counts. Nothing is stored. | 6/min |
+| `POST /api/v1/prompt-intelligence/breakdown/save` | Save the steps (`title`, `category`, `steps[{title, prompt, how_to_use}]`, optional `target_model`) as prompts tagged `breakdown` and `steps-<title>`. All or nothing against the library limit. | 20/min |
 | `POST /api/v1/prompt-intelligence/feedback` | Ratings and suggestion feedback for unsaved analyses (categories only). | 20/min |
 | `GET /api/v1/prompts/{id}/suggestions`, `PATCH /api/v1/suggestions/{id}` | Existing; status changes now write feedback events. | |
 | `GET/POST /api/v1/prompts/{id}/versions`, `POST /api/v1/prompts/{id}/restore/{version_id}` | Existing; saving a revision and restoring a version write feedback events. | |
@@ -416,6 +477,9 @@ Existing tables are reused and extended; no new column stores prompt text.
 - **Analyses** use the existing analysis quota (free 30, pro 1,000 per period).
 - **Generations and model-based optimisations** use the optimisation quota.
 - **Local-only token-saver revisions** consume no quota (nothing is billed).
+- **Breakdowns** planned by a model use one analysis unit. Rule-based
+  breakdowns are free. Attempts are recorded with request type
+  `prompt_breakdown`.
 - **Usage records:** every provider attempt is recorded once in
   `api_usage_records`, linked to its analysis, run or operation ID. Retried and
   repaired attempts are each recorded.

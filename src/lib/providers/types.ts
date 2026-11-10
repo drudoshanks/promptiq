@@ -1,15 +1,16 @@
 import type { TaskCategory } from "@/lib/categories";
 import type { UsageRecordStatus } from "@/lib/db/schema";
 import type { GenerationMode, SuggestionKind } from "@/lib/intelligence/categories";
-import type { ModelAnalysis, ModelComparison, ModelRevision, IntentRepresentation } from "@/lib/intelligence/schemas";
+import type { ModelAnalysis, ModelComparison, ModelRevision, IntentRepresentation, ModelBreakdown } from "@/lib/intelligence/schemas";
 import type { PromptTemplate } from "@/lib/intelligence/templates";
 import type { OptimiserMode } from "@/lib/optimiser/instructions";
 import type { OptimisationOutput } from "@/lib/optimiser/schema";
 
 /**
- * Narrow provider adapter interface (NFR-010, §10.5). The MVP guarantees only the
- * official OpenAI API; the mock adapter exists for local development, tests and
- * the evaluation harness.
+ * Narrow provider adapter interface (NFR-010, §10.5). Adapters: open-source
+ * models over any OpenAI-compatible chat API ("open"), the official OpenAI API
+ * ("openai"), and the deterministic rule-based engine ("mock"), which is also
+ * the fallback when an open model is unreachable.
  */
 export interface OptimiseRequest {
   prompt: string;
@@ -51,6 +52,16 @@ export interface RevisionRequest {
   restore: string[];
   preferences: Record<string, unknown>;
   questions: Array<{ key: string; question: string }>;
+  requestId: string;
+  userKey: string;
+}
+
+export interface BreakdownRequest {
+  prompt: string;
+  category: string;
+  requirements: Array<{ id: string; text: string; kind: string }>;
+  maxSteps: number;
+  preferences: Record<string, unknown>;
   requestId: string;
   userKey: string;
 }
@@ -105,19 +116,28 @@ export type StructuredResult<T> =
   | (ResultBase & { kind: "incomplete"; reason: string })
   | (ResultBase & { kind: "invalid_output"; reason: string });
 
+/** "open" is any open-source model behind an OpenAI-compatible chat API. */
+export type ProviderName = "open" | "openai" | "mock";
+
+/** Providers backed by a language model (as opposed to the rule-based engine). */
+export function isModelProvider(name: ProviderName): boolean {
+  return name !== "mock";
+}
+
 export interface OptimiserProvider {
-  readonly name: "openai" | "mock";
+  readonly name: ProviderName;
   readonly modelId: string;
   optimise(request: OptimiseRequest): Promise<OptimiseResult>;
 }
 
 /** Model-assisted operations of the Prompt Intelligence Engine (§11). */
 export interface IntelligenceProvider {
-  readonly name: "openai" | "mock";
+  readonly name: ProviderName;
   readonly modelId: string;
   analyseIntent(request: IntentAnalysisRequest): Promise<StructuredResult<ModelAnalysis>>;
   revisePrompt(request: RevisionRequest): Promise<StructuredResult<ModelRevision>>;
   compareRequirements(request: ComparisonRequest): Promise<StructuredResult<ModelComparison>>;
+  breakdownPrompt(request: BreakdownRequest): Promise<StructuredResult<ModelBreakdown>>;
 }
 
 export type AiProvider = OptimiserProvider & IntelligenceProvider;

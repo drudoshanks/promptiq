@@ -6,6 +6,8 @@ import { logger } from "@/lib/logger";
 import {
   buildAnalysisInstructions,
   buildAnalysisPayload,
+  buildBreakdownInstructions,
+  buildBreakdownPayload,
   buildComparisonInstructions,
   buildComparisonPayload,
   buildRevisionInstructions,
@@ -14,12 +16,15 @@ import {
 } from "@/lib/intelligence/instructions";
 import {
   modelAnalysisSchema,
+  modelBreakdownSchema,
   modelComparisonSchema,
   modelRevisionSchema,
   validateModelAnalysis,
+  validateModelBreakdown,
   validateModelComparison,
   validateModelRevision,
   type ModelAnalysis,
+  type ModelBreakdown,
   type ModelComparison,
   type ModelRevision,
 } from "@/lib/intelligence/schemas";
@@ -30,6 +35,7 @@ import { CircuitBreaker } from "./circuit-breaker";
 import {
   ProviderError,
   type AiProvider,
+  type BreakdownRequest,
   type ComparisonRequest,
   type IntentAnalysisRequest,
   type OptimiseRequest,
@@ -80,6 +86,8 @@ export class OpenAIOptimiserProvider implements AiProvider {
   private readonly revisionFormat = zodTextFormat(modelRevisionSchema, "prompt_revision");
   private readonly comparisonInstructions = buildComparisonInstructions();
   private readonly comparisonFormat = zodTextFormat(modelComparisonSchema, "requirement_comparison");
+  private readonly breakdownInstructions = buildBreakdownInstructions();
+  private readonly breakdownFormat = zodTextFormat(modelBreakdownSchema, "prompt_breakdown");
   private readonly breaker: CircuitBreaker;
   private readonly reasoningEffort: ReasoningEffort | undefined;
   private readonly sleep: (ms: number) => Promise<void>;
@@ -148,6 +156,19 @@ export class OpenAIOptimiserProvider implements AiProvider {
       cacheKey: `${INTELLIGENCE_TEMPLATE_VERSION}:compare`,
       maxOutputTokens: 1500,
       validate: validateModelComparison,
+    });
+  }
+
+  breakdownPrompt(request: BreakdownRequest): Promise<StructuredResult<ModelBreakdown>> {
+    return this.callStructured({
+      requestId: request.requestId,
+      userKey: request.userKey,
+      instructions: this.breakdownInstructions,
+      input: buildBreakdownPayload(request),
+      format: this.breakdownFormat,
+      cacheKey: `${INTELLIGENCE_TEMPLATE_VERSION}:breakdown`,
+      maxOutputTokens: 6000,
+      validate: validateModelBreakdown,
     });
   }
 

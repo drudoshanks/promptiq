@@ -29,6 +29,7 @@ const analysis = {
     { id: "s_2", category: "redundancy", category_label: "Redundancy", priority: "low", title: "Remove repeated instructions", explanation: "Repeats.", recommended_change: "Keep each once.", expected_benefit: "Shorter.", estimated_token_impact: -6, token_direction: "reduce", requires_clarification: false, clarification_question: null, source: "rules", ranking: { score: 0.5, acceptance: 0.5, preference_match: 0.5, task_relevance: 0.6, feedback_events: 0, explanation: "no feedback" }, status: "pending", persisted: false },
   ],
   already_well_optimised: false,
+  breakdown: { level: "recommended", headline: "Splitting this into smaller prompts will likely give you a better result.", reasons: ["It asks for 3 separate things."], deliverables: [] },
   summary: "2 improvements",
   token_estimate: { model: "gpt-5-mini", token_count: 4, cost: null },
   model_used: false,
@@ -66,6 +67,31 @@ const revision = {
 };
 let nextRevision = revision;
 
+const step = (number: number, title: string, prompt: string, depends_on: number[], extra: Record<string, unknown> = {}) => ({ number, title, goal: `Goal ${number}`, prompt, depends_on, parallel_with: [], expected_output: `Output ${number}`, how_to_use: number === 1 ? "Start here." : `Run after step ${depends_on.join(" and ")}.`, checks: [`Check ${number}`], requirement_ids: ["r1"], is_review: false, tokens: 40 + number, ...extra });
+const breakdownFixture = {
+  breakdown_id: "22222222-2222-4222-8222-222222222222",
+  prompt_id: null,
+  prompt_version_id: null,
+  title: "Write a blog post and create captions",
+  strategy: "deliverables",
+  engine: "rules",
+  fallback_reason: null,
+  category: "writing_communication",
+  category_label: "Writing and communication",
+  assessment: { level: "recommended", headline: "Splitting this into smaller prompts will likely give you a better result.", reasons: ["It asks for 2 separate things."], deliverables: [] },
+  shared_context: null,
+  run_mode: "same_chat",
+  steps: [
+    step(1, "Write a blog post", "Write a blog post about cakes.", []),
+    { ...step(2, "Create captions", "Create 3 captions for the post.\n\n[Paste the output of step 1 here]", [1]), parallel_with: [] },
+    step(3, "Check everything against your requirements", "Check it.", [1, 2], { is_review: true }),
+  ],
+  usage_advice: ["Run the steps in this order: 1 → 2 → 3.", "Read each answer before moving on."],
+  coverage: { total: 1, covered: 1, added: 0, items: [{ id: "r1", text: "Write a blog post about cakes.", kind: "objective", kind_label: "Objective", steps: [1], status: "covered" }], summary: "All 1 requirement is carried by at least one step." },
+  tokens: { model: "gpt-5-mini", original: 20, steps_total: 129 },
+  usage: null,
+};
+
 const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(status < 400 ? { data } : data), { status, headers: { "content-type": "application/json" } });
 let failNext = false;
@@ -77,6 +103,8 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     return json({ error: { code: "QUOTA_EXCEEDED", message: "You have used all 30 prompt analyses for this period." } }, 429);
   }
   if (url.endsWith("/analyse")) return json(analysis, 201);
+  if (url.endsWith("/breakdown/save")) return json({ tag: "steps-write-a-blog-post", prompts: [{ id: "a" }, { id: "b" }, { id: "c" }], library_url: "/app/library?tag=steps-write-a-blog-post" }, 201);
+  if (url.endsWith("/breakdown")) return json(breakdownFixture);
   if (url.endsWith("/optimise") || url.endsWith("/generate")) return json(nextRevision, 201);
   if (url.endsWith("/token-estimates")) return json({ model: "gpt-5-mini", token_count: 4, character_count: 26, cost: null });
   if (url.endsWith("/validate")) return json({ preservation: { ...revision.preservation, status: "failed", summary: "1 essential requirement is missing or reversed." }, estimate: { ...revision.estimate, optimised: count(2) } });
@@ -202,5 +230,49 @@ describe("Studio additions", () => {
     expect(second.body).toMatchObject({ prompt_id: "p-auto", version_id: "v1" });
     expect(second.body.prompt_text).toBeUndefined();
     expect(screen.getByRole("button", { name: /Accept and save as new version/ })).toBeTruthy();
+  });
+});
+
+describe("Break down", () => {
+  it("breaks a prompt into steps from the analysis hint, with run order, advice and coverage", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: /Analyse prompt/ }));
+    const hint = await screen.findByTestId("breakdown-hint");
+    expect(within(hint).getByText(/likely give you a better result/)).toBeTruthy();
+    fireEvent.click(within(hint).getByRole("button", { name: "Break it down" }));
+    const panel = await screen.findByTestId("breakdown");
+    expect(calls.at(-1)).toMatchObject({ url: "/api/v1/prompt-intelligence/breakdown", body: { prompt_text: PROMPT, category: "software_development", target_model: "gpt-5-mini" } });
+    expect(within(panel).getByRole("heading", { name: "Write a blog post and create captions" })).toBeTruthy();
+    expect(within(panel).getByText(/3 steps · Writing and communication · planned by built-in rules/)).toBeTruthy();
+    expect(within(panel).getByRole("list", { name: "Order to run the steps" }).textContent).toMatch(/Write a blog post.*Create captions.*Check everything/);
+    expect(within(panel).getByText("After step 1")).toBeTruthy();
+    expect(within(panel).getByText("Final check")).toBeTruthy();
+    // The placeholder is highlighted so it's hard to miss.
+    expect(within(panel).getByText("[Paste the output of step 1 here]").tagName).toBe("MARK");
+    expect(within(panel).getByText("Read each answer before moving on.")).toBeTruthy();
+    expect(within(panel).getByText("1 of 1 carried")).toBeTruthy();
+
+    fireEvent.click(within(panel).getAllByRole("checkbox", { name: "I've run this step" })[0]!);
+    expect(within(panel).getByText("1 of 3 done")).toBeTruthy();
+  });
+
+  it("edits a step, saves all steps to My prompts, and moves a step into the editor and back", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: /Break into smaller prompts/ }));
+    const panel = await screen.findByTestId("breakdown");
+    fireEvent.click(within(panel).getAllByRole("button", { name: "Edit" })[0]!);
+    fireEvent.change(within(panel).getByLabelText("Edit step 1 prompt"), { target: { value: "Write a 300-word blog post about cakes." } });
+
+    fireEvent.click(within(panel).getByRole("button", { name: /Save steps to My prompts/ }));
+    expect(await within(panel).findByRole("link", { name: /View 3 saved steps/ })).toHaveProperty("href", expect.stringContaining("/app/library?tag=steps-write-a-blog-post"));
+    const save = calls.find((c) => c.url.endsWith("/breakdown/save"))!;
+    expect(save.body).toMatchObject({ title: "Write a blog post and create captions", category: "writing_communication", target_model: "gpt-5-mini" });
+    expect((save.body.steps as Array<{ prompt: string }>)[0]!.prompt).toBe("Write a 300-word blog post about cakes.");
+
+    fireEvent.click(within(panel).getAllByRole("button", { name: "Improve this step in the editor" })[1]!);
+    expect((screen.getByLabelText("Prompt") as HTMLTextAreaElement).value).toBe("Create 3 captions for the post.\n\n[Paste the output of step 1 here]");
+    expect(screen.getByText(/Step 2 \(Create captions\) is in the editor/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Back to your original prompt/ }));
+    expect((screen.getByLabelText("Prompt") as HTMLTextAreaElement).value).toBe(PROMPT);
   });
 });
