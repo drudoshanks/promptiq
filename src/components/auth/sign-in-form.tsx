@@ -39,7 +39,7 @@ export function SignInForm({ providers, next }: SignInFormProps) {
 
   return (
     <div className="panel p-6 sm:p-8">
-      <h1 className="text-2xl">Sign in</h1>
+      <h1 className="text-[1.75rem]">Sign in</h1>
       <p className="mt-2 text-ink-soft">Welcome back. Your prompts and preferences are where you left them.</p>
       <div className="mt-6">
         <SocialButtons providers={providers} callbackURL={next} />

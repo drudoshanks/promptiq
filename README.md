@@ -1,11 +1,26 @@
-# PromptIQ
+# PromptIQ by iMarwar
 
-A prompt optimisation and export SaaS for individual AI users, built to the
-PromptIQ SRS v1.0 (30 October 2026). Paste a prompt, get a structured rewrite
-from the official OpenAI API, compare it word by word with the original, edit,
-accept, export as TXT/Markdown/JSON, and keep every version. Preferences are
-only ever created by the user; token counts are labelled as estimates; the
-final prompt is never executed.
+A prompt optimisation and export SaaS for individual AI users, built by
+[iMarwar](https://imarwar.com/) to the PromptIQ SRS v1.0 (30 October 2026).
+Paste a prompt, get a structured rewrite from an open-source model or the
+OpenAI API, or break a big prompt into step-by-step prompts. Compare it word by
+word with the original, edit, accept, export as TXT/Markdown/JSON, and keep
+every version. Preferences are only ever created by the user, token counts are
+labelled as estimates, and the final prompt is never executed.
+
+## Brand and design
+
+- **Brand:** PromptIQ is branded as a product of iMarwar.
+- **Brand assets:** in `public/brand/`.
+  - `imarwar-logo.svg` and `imarwar-logo-white.svg` (for dark backgrounds);
+  - `imarwar-mark.svg`, the dot mark, also used as `public/favicon.svg`.
+- **Company details:** shown in the footer and credits; set in `src/components/brand.tsx` (`IMARWAR`).
+- **Design tokens:** iMarwar orange `#FC7905` / `#FD8A22`, a warm off-white
+  ground, near-black ink, and indigo for estimates. Radii and shadows are set
+  there too. They live in `src/app/globals.css` (`@theme`), so a recolour is a
+  one-file change.
+- **Fonts:** Plus Jakarta Sans and IBM Plex Mono, self-hosted through
+  `@fontsource`. No requests go to Google Fonts.
 
 ## Stack
 

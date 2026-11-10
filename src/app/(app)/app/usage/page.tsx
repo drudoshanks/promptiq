@@ -39,7 +39,7 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
       <div className="grid gap-4 md:grid-cols-2">
         <section className="panel p-5">
           <h2 className="text-base">This period</h2>
-          <p className="mt-3 text-3xl">
+          <p className="mt-3 text-3xl font-extrabold tracking-[-0.035em] tabular-nums">
             {formatNumber(usage.used)} <span className="text-base text-ink-faint">of {formatNumber(usage.limit)} optimisations</span>
           </p>
           <div className="meter mt-3" role="meter" aria-valuemin={0} aria-valuemax={usage.limit} aria-valuenow={usage.used} aria-label="Optimisations used">
@@ -70,7 +70,7 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
 
         <section className="panel p-5">
           <h2 className="text-base">Plan</h2>
-          <p className="mt-3 text-3xl">{usage.plan.name}</p>
+          <p className="mt-3 text-3xl font-extrabold tracking-[-0.035em] tabular-nums">{usage.plan.name}</p>
           {subscription ? (
             <p className="mt-1 text-sm text-ink-soft">
               Subscription {subscription.status.replace("_", " ")}

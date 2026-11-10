@@ -131,7 +131,7 @@ export function OnboardingForm({ initial }: OnboardingFormProps) {
         </div>
 
         <p className="text-sm text-ink-soft">
-          Prompts you optimise are sent to OpenAI&apos;s API from our servers. Feedback you give is used to improve your own results, never to train models.
+          Prompts you optimise are sent from our servers to the AI model PromptIQ uses (an open-source model or OpenAI). Feedback you give is used to improve your own results, never to train models.
         </p>
 
         {error ? <Alert tone="error">{error}</Alert> : null}

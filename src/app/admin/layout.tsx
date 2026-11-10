@@ -12,10 +12,10 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   if (!user) redirect("/sign-in?next=/admin");
   if (!user.isAdmin) redirect("/app");
   return (
-    <div className="min-h-dvh lg:flex">
+    <div className="canvas-app min-h-dvh lg:flex">
       <AppNav email={user.email} isAdmin />
       <main className="min-w-0 flex-1">
-        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-10 lg:py-10">{children}</div>
+        <div className="mx-auto max-w-[78rem] px-4 py-6 sm:px-6 lg:px-10 lg:py-10">{children}</div>
       </main>
     </div>
   );
