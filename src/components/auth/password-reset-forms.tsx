@@ -30,7 +30,7 @@ export function ForgotPasswordForm() {
 
   return (
     <div className="panel p-6 sm:p-8">
-      <h1 className="text-2xl">Reset your password</h1>
+      <h1 className="text-[1.75rem]">Reset your password</h1>
       {done ? (
         <Alert tone="success" className="mt-4" title="Check your email">
           If an account exists for {email.trim()}, a reset link is on its way. It expires in one hour.
@@ -77,7 +77,7 @@ export function ResetPasswordForm({ token }: { token: string | null }) {
 
   return (
     <div className="panel p-6 sm:p-8">
-      <h1 className="text-2xl">Choose a new password</h1>
+      <h1 className="text-[1.75rem]">Choose a new password</h1>
       {!token ? (
         <Alert tone="error" className="mt-4">
           This reset link is missing its token. Request a new link from the sign-in page.

@@ -5,11 +5,11 @@ import { cx } from "@/lib/utils";
 
 import { Spinner } from "./spinner";
 
-type Variant = "primary" | "secondary" | "ghost" | "danger";
+type Variant = "primary" | "secondary" | "ghost" | "danger" | "outline" | "dark";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
-  size?: "md" | "sm";
+  size?: "md" | "sm" | "lg";
   loading?: boolean;
   children: ReactNode;
 }
@@ -18,7 +18,7 @@ export function Button({ variant = "secondary", size = "md", loading = false, cl
   return (
     <button
       type={rest.type ?? "button"}
-      className={cx("btn", `btn-${variant}`, size === "sm" && "btn-sm", className)}
+      className={cx("btn", `btn-${variant}`, size !== "md" && `btn-${size}`, className)}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       {...rest}
@@ -32,14 +32,14 @@ export function Button({ variant = "secondary", size = "md", loading = false, cl
 interface LinkButtonProps {
   href: string;
   variant?: Variant;
-  size?: "md" | "sm";
+  size?: "md" | "sm" | "lg";
   className?: string;
   children: ReactNode;
 }
 
 export function LinkButton({ href, variant = "secondary", size = "md", className, children }: LinkButtonProps) {
   return (
-    <Link href={href} className={cx("btn", `btn-${variant}`, size === "sm" && "btn-sm", className)}>
+    <Link href={href} className={cx("btn", `btn-${variant}`, size !== "md" && `btn-${size}`, className)}>
       {children}
     </Link>
   );

@@ -78,7 +78,7 @@ export default async function AdminPage() {
           </section>
           <section className="panel p-5">
             <h2 className="text-base">Quota pressure (24h)</h2>
-            <p className="mt-3 text-2xl">{formatNumber(metrics.abuse_signals.quota_rejections_24h)}</p>
+            <p className="mt-3 text-2xl font-extrabold tracking-[-0.035em] tabular-nums">{formatNumber(metrics.abuse_signals.quota_rejections_24h)}</p>
             <p className="text-sm text-ink-soft">requests rejected for exceeding plan quota</p>
             <h3 className="mt-4 text-sm font-medium text-ink-soft">Heaviest accounts</h3>
             <ul className="mt-1 space-y-1 text-sm">

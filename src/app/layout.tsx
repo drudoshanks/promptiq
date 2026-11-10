@@ -1,14 +1,22 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
+import "@fontsource-variable/plus-jakarta-sans";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "PromptIQ",
-    template: "%s · PromptIQ",
+    default: "PromptIQ by iMarwar",
+    template: "%s · PromptIQ by iMarwar",
   },
-  description: "Rewrite your prompts for clarity, see every change, keep every fact. Edit, accept and export: you stay in control.",
+  description: "PromptIQ by iMarwar turns rough requests into AI-ready prompts: analyse, optimise or break them into steps, with every requirement checked and token costs shown.",
+  applicationName: "PromptIQ",
+  authors: [{ name: "iMarwar", url: "https://imarwar.com/" }],
+  creator: "iMarwar",
+  publisher: "iMarwar",
   robots: { index: true, follow: true },
   icons: { icon: "/favicon.svg" },
 };
@@ -16,16 +24,6 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/* Root App Router layout applies to every page; loaded at runtime so builds need no network. */}
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
-          rel="stylesheet"
-        />
-      </head>
       <body className="font-sans">{children}</body>
     </html>
   );

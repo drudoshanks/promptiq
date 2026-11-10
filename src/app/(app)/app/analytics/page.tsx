@@ -32,12 +32,12 @@ export default async function AnalyticsPage() {
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="panel p-5">
           <p className="text-sm text-ink-soft">Prompts analysed</p>
-          <p className="mt-1 text-2xl">{formatNumber(a.prompts_analysed)}</p>
+          <p className="mt-1 text-2xl font-extrabold tracking-[-0.035em] tabular-nums">{formatNumber(a.prompts_analysed)}</p>
           <p className="text-sm text-ink-soft">{formatNumber(a.analyses_completed)} analyses</p>
         </div>
         <div className="panel p-5">
           <p className="text-sm text-ink-soft">Suggestions</p>
-          <p className="mt-1 text-2xl">{formatNumber((st.accepted ?? 0) + (st.applied ?? 0))} accepted</p>
+          <p className="mt-1 text-2xl font-extrabold tracking-[-0.035em] tabular-nums">{formatNumber((st.accepted ?? 0) + (st.applied ?? 0))} accepted</p>
           <p className="text-sm text-ink-soft">
             {formatNumber(st.dismissed ?? 0)} dismissed, {formatNumber(st.pending ?? 0)} pending
             {decided ? `, ${Math.round((((st.accepted ?? 0) + (st.applied ?? 0)) / decided) * 100)}% acceptance` : ""}
@@ -47,14 +47,14 @@ export default async function AnalyticsPage() {
           <p className="flex items-center gap-2 text-sm text-ink-soft">
             Net tokens saved <Badge tone="estimate">estimate</Badge>
           </p>
-          <p className="mt-1 text-2xl">{formatNumber(s.tokens_saved.net_tokens_saved)}</p>
+          <p className="mt-1 text-2xl font-extrabold tracking-[-0.035em] tabular-nums">{formatNumber(s.tokens_saved.net_tokens_saved)}</p>
           <p className="text-sm text-ink-soft">once per prompt, current vs original</p>
         </div>
         <div className="panel p-5">
           <p className="flex items-center gap-2 text-sm text-ink-soft">
             Average reduction <Badge tone="estimate">estimate</Badge>
           </p>
-          <p className="mt-1 text-2xl">{a.per_prompt.average_reduction_percent === null ? "—" : `${a.per_prompt.average_reduction_percent}%`}</p>
+          <p className="mt-1 text-2xl font-extrabold tracking-[-0.035em] tabular-nums">{a.per_prompt.average_reduction_percent === null ? "—" : `${a.per_prompt.average_reduction_percent}%`}</p>
           <p className="text-sm text-ink-soft">across {formatNumber(a.per_prompt.prompts_with_new_versions)} prompts with new versions</p>
         </div>
       </section>

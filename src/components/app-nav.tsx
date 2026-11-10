@@ -11,6 +11,7 @@ import {
   Lightbulb,
   LogOut,
   Menu,
+  Plus,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
@@ -22,6 +23,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { MadeByImarwar, ProductLogo } from "@/components/brand";
 import { authClient } from "@/lib/auth/client";
 import { cx } from "@/lib/utils";
 
@@ -74,8 +76,8 @@ function NavLinks({ isAdmin, onNavigate }: { isAdmin: boolean; onNavigate?: () =
     <nav aria-label="Application" className="space-y-5">
       {groups.map((group) => (
         <div key={group.label}>
-          <p className="mb-1.5 px-3 text-[0.8125rem] font-medium text-ink-faint">{group.label}</p>
-          <ul className="space-y-0.5">
+          <p className="eyebrow mb-2 px-3.5 text-[0.6875rem]">{group.label}</p>
+          <ul className="space-y-1">
             {group.items.map((item) => {
               const current = item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`);
               const Icon = item.icon;
@@ -96,14 +98,7 @@ function NavLinks({ isAdmin, onNavigate }: { isAdmin: boolean; onNavigate?: () =
 }
 
 function Brand() {
-  return (
-    <Link href="/app" className="flex items-center gap-2 text-[1.0625rem] font-semibold tracking-tight no-underline">
-      <span aria-hidden="true" className="grid h-7 w-7 place-items-center rounded-[7px] bg-accent font-mono text-[0.8125rem] font-semibold text-white">
-        iq
-      </span>
-      PromptIQ
-    </Link>
-  );
+  return <ProductLogo href="/app" compact />;
 }
 
 /** Application shell: a grouped sidebar on wide screens, a top bar with a drawer on small ones. */
@@ -127,33 +122,50 @@ export function AppNav({ email, isAdmin }: AppNavProps) {
     router.refresh();
   };
 
+  const initial = (email ?? "?").trim().charAt(0).toUpperCase();
   const account = (
-    <div className="border-t border-line pt-4">
-      {email ? (
-        <p className="truncate px-3 text-sm text-ink-soft" title={email}>
-          {email}
-        </p>
-      ) : null}
-      <button type="button" className="nav-link mt-1 w-full" disabled={signingOut} onClick={signOut}>
-        <LogOut aria-hidden="true" />
-        {signingOut ? "Signing out…" : "Sign out"}
-      </button>
+    <div className="space-y-3">
+      <div className="flex items-center gap-3 rounded-2xl border border-line bg-panel-soft p-2.5">
+        <span aria-hidden="true" className="grid h-9 w-9 flex-none place-items-center rounded-full bg-gradient-to-b from-brand-light to-accent text-sm font-bold text-white">
+          {initial}
+        </span>
+        <div className="min-w-0 flex-1">
+          {email ? (
+            <p className="truncate text-sm font-semibold" title={email}>
+              {email}
+            </p>
+          ) : null}
+          <button type="button" className="text-[0.8125rem] font-medium text-ink-soft hover:text-accent-deep disabled:opacity-60" disabled={signingOut} onClick={signOut}>
+            <LogOut aria-hidden="true" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
+            {signingOut ? "Signing out…" : "Sign out"}
+          </button>
+        </div>
+      </div>
+      <MadeByImarwar className="px-2" />
     </div>
+  );
+
+  const newPrompt = (
+    <Link href="/app/studio" className="btn btn-primary w-full" onClick={() => setOpen(false)}>
+      <Plus className="h-4 w-4" aria-hidden="true" />
+      New prompt
+    </Link>
   );
 
   return (
     <>
-      <aside className="sticky top-0 hidden h-dvh w-64 flex-none flex-col gap-6 overflow-y-auto border-r border-line bg-panel px-4 py-5 lg:flex">
+      <aside className="sticky top-0 hidden h-dvh w-[17rem] flex-none flex-col gap-5 overflow-y-auto border-r border-line bg-panel/90 px-4 py-5 backdrop-blur lg:flex">
         <div className="px-2">
           <Brand />
         </div>
+        {newPrompt}
         <div className="flex-1">
           <NavLinks isAdmin={isAdmin} />
         </div>
         {account}
       </aside>
 
-      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-panel/95 px-4 py-3 backdrop-blur lg:hidden">
+      <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-panel/90 px-4 py-2.5 backdrop-blur lg:hidden">
         <Brand />
         <button type="button" className="btn btn-ghost btn-sm" aria-expanded={open} aria-controls="mobile-nav" onClick={() => setOpen(true)}>
           <Menu className="h-5 w-5" aria-hidden="true" />
@@ -171,7 +183,7 @@ export function AppNav({ email, isAdmin }: AppNavProps) {
         role="dialog"
         aria-modal="true"
         aria-label="Menu"
-        className={cx("fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col gap-6 overflow-y-auto bg-panel px-4 py-5 shadow-xl transition-transform lg:hidden", open ? "translate-x-0" : "-translate-x-full")}
+        className={cx("fixed inset-y-0 left-0 z-50 flex w-[18rem] max-w-[85vw] flex-col gap-6 overflow-y-auto bg-panel px-4 py-5 shadow-xl transition-transform lg:hidden", open ? "translate-x-0" : "-translate-x-full")}
         key={pathname}
       >
         <div className="flex items-center justify-between px-2">
@@ -181,6 +193,7 @@ export function AppNav({ email, isAdmin }: AppNavProps) {
             <span className="sr-only">Close menu</span>
           </button>
         </div>
+        {newPrompt}
         <div className="flex-1">
           <NavLinks isAdmin={isAdmin} onNavigate={() => setOpen(false)} />
         </div>

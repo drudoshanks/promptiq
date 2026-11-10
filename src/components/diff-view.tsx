@@ -37,13 +37,15 @@ export function DiffView({ original, proposed, highlight = true, className }: Di
   return (
     <div className={cx("grid gap-4 lg:grid-cols-2", className)}>
       <section aria-labelledby="diff-original" className="panel-soft p-4">
-        <h3 id="diff-original" className="mb-3 text-sm font-medium text-ink-soft">
+        <h3 id="diff-original" className="mb-3 flex items-center gap-2 text-sm font-bold text-ink-soft">
+          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-ink-faint" />
           Original
         </h3>
         <div className="prompt-text">{segments ? <Segments segments={originalSide(segments)} side="original" /> : original}</div>
       </section>
       <section aria-labelledby="diff-proposed" className="panel p-4">
-        <h3 id="diff-proposed" className="mb-3 text-sm font-medium text-ink-soft">
+        <h3 id="diff-proposed" className="mb-3 flex items-center gap-2 text-sm font-bold text-accent-deep">
+          <span aria-hidden="true" className="h-2 w-2 rounded-full bg-accent" />
           Proposed
         </h3>
         <div className="prompt-text">{segments ? <Segments segments={proposedSide(segments)} side="proposed" /> : proposed}</div>
