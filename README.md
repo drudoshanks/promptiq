@@ -2,8 +2,8 @@
 
 A prompt optimisation and export SaaS for individual AI users, built by
 [iMarwar](https://imarwar.com/) to the PromptIQ SRS v1.0 (30 October 2026).
-Paste a prompt, get a structured rewrite from an open-source model or the
-OpenAI API, or break a big prompt into step-by-step prompts. Compare it word by
+Paste a prompt, get a structured rewrite from Claude (Anthropic), an
+open-source model or the OpenAI API, or break a big prompt into step-by-step prompts. Compare it word by
 word with the original, edit, accept, export as TXT/Markdown/JSON, and keep
 every version. Preferences are only ever created by the user, token counts are
 labelled as estimates, and the final prompt is never executed.
@@ -29,7 +29,7 @@ labelled as estimates, and the final prompt is never executed.
 | Web and API | Next.js 16 (App Router, route handlers), React 19, TypeScript strict | `src/app`, `src/components` |
 | Database | PostgreSQL 14+ via Drizzle ORM, plain SQL migrations | `db/migrations`, `src/lib/db` |
 | Auth | Better Auth: email + password with recovery, Google and GitHub OAuth | one-file integration in `src/lib/auth/auth.ts`; the app only calls `getCurrentUser()` |
-| Optimiser | Provider adapter: open-source models over any OpenAI-compatible chat API (Ollama, vLLM, Groq, OpenRouter ...), the OpenAI Responses API, or the built-in rule-based engine | `src/lib/providers`, `src/lib/optimiser` |
+| Optimiser | Provider adapter: Claude (Anthropic Messages API with structured outputs), open-source models over any OpenAI-compatible chat API (Ollama, vLLM, Groq, OpenRouter ...), the OpenAI Responses API, or the built-in rule-based engine | `src/lib/providers`, `src/lib/optimiser` |
 | Billing | Stripe Checkout + Customer Portal, signed and idempotent webhooks | `src/lib/services/billing.ts` |
 | Styling | Tailwind CSS 4 with a small token set | `src/app/globals.css` |
 | Tests | Vitest (unit + embedded PostgreSQL via PGlite), Playwright (E2E) | `tests/` |
@@ -58,6 +58,18 @@ npm run dev                       # http://localhost:3000
 Sign up with any email and a 10+ character password (no email service is needed
 locally: password-reset links print to the server log). The default `mock`
 provider is the built-in rule-based engine: no AI model, no cost.
+
+**To use Claude (recommended):** create an API key in the
+[Claude Console](https://platform.claude.com/) (API keys) and add it to
+`.env.local` (production: your host's environment variables):
+
+```
+OPTIMISER_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-…
+ANTHROPIC_MODEL=claude-sonnet-5-5   # or claude-haiku-5-5 / claude-opus-5-5
+```
+
+Full guide: [`docs/claude.md`](docs/claude.md).
 
 To use a free, open-source model on your own machine with
 [Ollama](https://ollama.com):

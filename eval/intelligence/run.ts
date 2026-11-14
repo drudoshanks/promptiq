@@ -2,6 +2,7 @@
  * Prompt Intelligence evaluation (§15).
  *
  *   npm run eval:intelligence                         # local provider (deterministic)
+ *   OPTIMISER_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-... npm run eval:intelligence  # Claude
  *   OPTIMISER_PROVIDER=open OPEN_MODEL=qwen2.5:7b npm run eval:intelligence  # open model (Ollama etc.)
  *   OPTIMISER_PROVIDER=openai npm run eval:intelligence -- --live --limit 5
  *
@@ -28,6 +29,7 @@ import { INTELLIGENCE_TEMPLATE_VERSION } from "../../src/lib/intelligence/instru
 import { scorePrompt } from "../../src/lib/intelligence/scorer";
 import type { GenerationMode } from "../../src/lib/intelligence/categories";
 import { MockOptimiserProvider } from "../../src/lib/providers/mock";
+import { AnthropicProvider } from "../../src/lib/providers/anthropic";
 import { OpenModelProvider } from "../../src/lib/providers/open-model";
 import { OpenAIOptimiserProvider } from "../../src/lib/providers/openai";
 import type { AiProvider } from "../../src/lib/providers/types";
@@ -60,6 +62,15 @@ function args() {
 }
 
 function provider(): AiProvider {
+  if (process.env.OPTIMISER_PROVIDER === "anthropic") {
+    // No rule-based fallback here: the point is to measure the model itself.
+    return new AnthropicProvider({
+      apiKey: process.env.ANTHROPIC_API_KEY ?? "",
+      modelId: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5-5",
+      timeoutMs: Number(process.env.ANTHROPIC_TIMEOUT_MS ?? 90_000),
+      effort: (process.env.ANTHROPIC_EFFORT as "low" | "medium" | "high" | undefined) ?? "low",
+    });
+  }
   if (process.env.OPTIMISER_PROVIDER === "open") {
     // No rule-based fallback here: the point is to measure the model itself.
     return new OpenModelProvider({

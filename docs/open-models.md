@@ -75,14 +75,14 @@ reasoning is stripped before parsing. Measure before you switch (see
 
 ## Rule-based fallback
 
-With `OPEN_MODEL_FALLBACK=rules` (the default), the user still gets a result
+With `OPTIMISER_FALLBACK=rules` (the default; `OPEN_MODEL_FALLBACK` is the older name), the user still gets a result
 when the model server is down, the model is missing, or the model keeps
 returning unusable output. In those cases PromptIQ answers with the built-in
 rule-based engine. Refusals are never overridden. The failed model attempts and
 the fallback attempt are both recorded, with model ID `mock-optimiser` for the
 fallback, so usage history and the admin page show which engine answered. The
 server log line is `primary provider unavailable; using rule-based engine`.
-Set `OPEN_MODEL_FALLBACK=none` to return an error instead.
+Set `OPTIMISER_FALLBACK=none` to return an error instead.
 
 ## Errors
 

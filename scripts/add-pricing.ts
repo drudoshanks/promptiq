@@ -42,7 +42,7 @@ async function main() {
   const provider = arg("provider") ?? "openai";
   // The registry lists target models the Studio can count tokens for. An open
   // model used as the optimiser only needs a price, so it is exempt.
-  if (provider !== "open" && !isSupportedModel(model)) throw new Error(`"${model}" is not in the supported model registry (src/lib/config/models.ts)`);
+  if (provider !== "open" && provider !== "anthropic" && !isSupportedModel(model)) throw new Error(`"${model}" is not in the supported model registry (src/lib/config/models.ts)`);
   const effectiveFrom = new Date(arg("effective-from") ?? new Date().toISOString().slice(0, 10));
   const cached = arg("cached");
 

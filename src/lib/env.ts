@@ -24,8 +24,22 @@ const schema = z.object({
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default("PromptIQ <no-reply@example.com>"),
 
-  OPTIMISER_PROVIDER: z.enum(["open", "openai", "mock"]).default("mock"),
+  OPTIMISER_PROVIDER: z.enum(["anthropic", "open", "openai", "mock"]).default("mock"),
   OPENAI_API_KEY: z.string().optional(),
+  /** Claude (Anthropic). Used when OPTIMISER_PROVIDER=anthropic. Create a key in the Claude Console. */
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-5-5"),
+  /** How much work Claude puts into each answer, thinking included. */
+  ANTHROPIC_EFFORT: z.enum(["low", "medium", "high"]).default("low"),
+  ANTHROPIC_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(90_000),
+  /** Optional: a gateway or proxy in front of the Claude API. Leave unset to use api.anthropic.com. */
+  ANTHROPIC_BASE_URL: z.url().optional(),
+  /**
+   * When the AI model (Claude or an open model) is unreachable or keeps returning
+   * unusable output: "rules" answers with the built-in rule-based engine, "none"
+   * returns an error. OPEN_MODEL_FALLBACK is the older name and still works.
+   */
+  OPTIMISER_FALLBACK: z.enum(["rules", "none"]).optional(),
   /**
    * Open-source models through any OpenAI-compatible chat API: Ollama
    * (default, http://localhost:11434/v1), LM Studio, vLLM, llama.cpp server,
@@ -38,7 +52,7 @@ const schema = z.object({
   OPEN_MODEL_OUTPUT: z.enum(["json_schema", "json_object"]).default("json_schema"),
   OPEN_MODEL_TIMEOUT_MS: z.coerce.number().int().min(1000).max(600_000).default(120_000),
   /** "rules" falls back to the built-in rule-based engine when the model is unreachable. */
-  OPEN_MODEL_FALLBACK: z.enum(["rules", "none"]).default("rules"),
+  OPEN_MODEL_FALLBACK: z.enum(["rules", "none"]).optional(),
   OPTIMISER_MODEL: z.string().default("gpt-5-mini"),
   OPTIMISER_REASONING_EFFORT: z
     .enum(["none", "minimal", "low", "medium", "high", ""])
@@ -89,6 +103,9 @@ function loadEnv(): Env {
   const env = parsed.data;
   if (env.OPTIMISER_PROVIDER === "openai" && !env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required when OPTIMISER_PROVIDER=openai");
+  }
+  if (env.OPTIMISER_PROVIDER === "anthropic" && !env.ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY is required when OPTIMISER_PROVIDER=anthropic (create one in the Claude Console: https://platform.claude.com/)");
   }
   return env;
 }

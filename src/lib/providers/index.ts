@@ -2,6 +2,7 @@ import "server-only";
 
 import { env } from "@/lib/env";
 
+import { AnthropicProvider } from "./anthropic";
 import { FallbackProvider } from "./fallback";
 import { MockOptimiserProvider } from "./mock";
 import { OpenModelProvider } from "./open-model";
@@ -12,8 +13,20 @@ declare global {
   var __promptiqProvider: AiProvider | undefined;
 }
 
+const rulesFallbackEnabled = () => (env.OPTIMISER_FALLBACK ?? env.OPEN_MODEL_FALLBACK ?? "rules") === "rules";
+
 function build(): AiProvider {
   switch (env.OPTIMISER_PROVIDER) {
+    case "anthropic": {
+      const claude = new AnthropicProvider({
+        apiKey: env.ANTHROPIC_API_KEY as string,
+        ...(env.ANTHROPIC_BASE_URL ? { baseUrl: env.ANTHROPIC_BASE_URL } : {}),
+        modelId: env.ANTHROPIC_MODEL,
+        timeoutMs: env.ANTHROPIC_TIMEOUT_MS,
+        effort: env.ANTHROPIC_EFFORT,
+      });
+      return rulesFallbackEnabled() ? new FallbackProvider(claude, new MockOptimiserProvider()) : claude;
+    }
     case "open": {
       const open = new OpenModelProvider({
         baseUrl: env.OPEN_MODEL_BASE_URL,
@@ -22,7 +35,7 @@ function build(): AiProvider {
         timeoutMs: env.OPEN_MODEL_TIMEOUT_MS,
         outputMode: env.OPEN_MODEL_OUTPUT,
       });
-      return env.OPEN_MODEL_FALLBACK === "rules" ? new FallbackProvider(open, new MockOptimiserProvider()) : open;
+      return rulesFallbackEnabled() ? new FallbackProvider(open, new MockOptimiserProvider()) : open;
     }
     case "openai":
       return new OpenAIOptimiserProvider({
@@ -46,6 +59,7 @@ export function getOptimiserProvider(): AiProvider {
 
 /** Model ID of the configured provider, for display. */
 export function configuredModelId(): string {
+  if (env.OPTIMISER_PROVIDER === "anthropic") return env.ANTHROPIC_MODEL;
   if (env.OPTIMISER_PROVIDER === "open") return env.OPEN_MODEL;
   if (env.OPTIMISER_PROVIDER === "openai") return env.OPTIMISER_MODEL;
   return "mock-optimiser";
