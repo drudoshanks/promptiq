@@ -117,7 +117,7 @@ export type StructuredResult<T> =
   | (ResultBase & { kind: "invalid_output"; reason: string });
 
 /** "open" is any open-source model behind an OpenAI-compatible chat API. */
-export type ProviderName = "open" | "openai" | "mock";
+export type ProviderName = "anthropic" | "open" | "openai" | "mock";
 
 /** Providers backed by a language model (as opposed to the rule-based engine). */
 export function isModelProvider(name: ProviderName): boolean {

@@ -63,7 +63,7 @@ export function SignUpForm({ providers }: SignUpFormProps) {
           Create account
         </Button>
         <p className="text-sm text-ink-soft">
-          By continuing you agree to the <Link href="/#privacy">privacy notice</Link>. Prompts you optimise are sent from our servers to the AI model PromptIQ uses (an open-source model or OpenAI).
+          By continuing you agree to the <Link href="/#privacy">privacy notice</Link>. Prompts you optimise are sent from our servers to the AI model PromptIQ uses (Claude by Anthropic, an open-source model or OpenAI).
         </p>
       </form>
       <p className="mt-5 text-sm text-ink-soft">

@@ -102,7 +102,7 @@ export function SettingsForm({ initial }: SettingsFormProps) {
           description="When off, rewrites ignore your preference memory. The preferences themselves stay where they are until you delete them."
         />
         <p className="text-sm text-ink-soft">
-          Prompts you optimise or analyse are sent from our servers to the AI model PromptIQ uses (an open-source model or OpenAI). Saved prompts are used only to provide features to you. We do not use them for analytics, and we never train models on them; that would require a separate, explicit opt-in, which PromptIQ does not ask for.
+          Prompts you optimise or analyse are sent from our servers to the AI model PromptIQ uses (Claude by Anthropic, an open-source model or OpenAI). Saved prompts are used only to provide features to you. We do not use them for analytics, and we never train models on them; that would require a separate, explicit opt-in, which PromptIQ does not ask for.
         </p>
         {error ? <Alert tone="error">{error}</Alert> : null}
         {saved ? <Alert tone="success">Settings saved.</Alert> : null}

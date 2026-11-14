@@ -45,7 +45,7 @@ const STEPS = [
 ];
 
 const PRIVACY = [
-  { icon: Lock, text: "Your prompt is sent from our servers to the AI model this workspace uses (an open-source model or OpenAI) to be analysed or rewritten. Nothing else is shared." },
+  { icon: Lock, text: "Your prompt is sent from our servers to the AI model this workspace uses (Claude by Anthropic, an open-source model or OpenAI) to be analysed or rewritten. Nothing else is shared." },
   { icon: FileClock, text: "Prompts are stored only when history is on, or when you save one. Turn history off and nothing is kept beyond the request." },
   { icon: UserCheck, text: "Preferences are only ever created by you: when you set them, or when you confirm a suggestion. Nothing is inferred silently." },
   { icon: BadgeCheck, text: "Every stored preference shows where it came from, and you can edit, disable or delete it. Export your data or delete your account at any time." },
@@ -55,7 +55,7 @@ const FAQ = [
   { q: "Does PromptIQ run my prompt?", a: "No. PromptIQ improves the prompt itself. You copy the result into ChatGPT, Claude, Gemini or any other assistant and run it there." },
   { q: "Will it change what I asked for?", a: "It shouldn't, and it checks. Every requirement it finds in your prompt (values, restrictions, formats, length, tone) is checked in the result. Anything missing is put back and flagged, and you review every change before accepting it." },
   { q: "When should I break a prompt into steps?", a: "When one request asks for several things, or one big thing such as an app or a report. PromptIQ tells you when splitting is likely to help, then gives you a short sequence of self-contained prompts and how to run them." },
-  { q: "Which AI models does PromptIQ use?", a: "PromptIQ can run on open-source models (such as Llama or Qwen, self-hosted or via a hosted provider) or on OpenAI. Token counts and costs are shown for the model you plan to send your prompt to." },
+  { q: "Which AI models does PromptIQ use?", a: "PromptIQ runs on Claude by Anthropic, and can also use open-source models (such as Llama or Qwen) or OpenAI. Token counts and costs are shown for the model you plan to send your prompt to." },
   { q: "Can I pay from India?", a: "Yes. Pro is available in rupees with UPI. Pay with any UPI app, submit the reference, and your plan activates once the payment is verified. PromptIQ never asks for your UPI PIN or OTP." },
 ];
 
