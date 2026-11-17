@@ -6,6 +6,7 @@ import { HARD_MAX_PROMPT_CHARS } from "@/lib/config/plans";
 import { PAYMENT_STATUSES, PROVENANCES } from "@/lib/db/schema";
 import { GENERATION_MODES, INTENT_CATEGORIES, SUGGESTION_KINDS } from "@/lib/intelligence/categories";
 import { EXPORT_FORMATS } from "@/lib/export";
+import { LIBRARY_CATEGORIES, LIBRARY_SORTS } from "@/lib/prompt-library/categories";
 
 const taskCategory = z.enum(TASK_CATEGORIES);
 const taskCategoryOrAuto = z.enum([...TASK_CATEGORIES, "auto"]);
@@ -392,3 +393,21 @@ export const verifyPaymentSchema = z
 
 export const rejectPaymentSchema = z.object({ reason: z.string().min(10).max(1000) }).strict();
 export const requestInformationSchema = z.object({ message: z.string().min(10).max(1000) }).strict();
+
+// Prompt library
+export const libraryQuerySchema = z.object({
+  q: z.string().trim().max(200).optional(),
+  category: z.enum(LIBRARY_CATEGORIES).optional(),
+  sort: z.enum(LIBRARY_SORTS).optional(),
+  page: z.coerce.number().int().min(1).max(1000).default(1),
+  page_size: z.coerce.number().int().min(1).max(60).default(24),
+});
+
+export const librarySlugParamSchema = z.object({ slug: z.string().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/).max(80) });
+
+export const saveLibraryPromptSchema = z
+  .object({
+    values: z.record(z.string().regex(/^[a-zA-Z][\w ]{0,40}$/), z.string().max(5000)).optional(),
+  })
+  .strict()
+  .refine((b) => Object.keys(b.values ?? {}).length <= 40, { message: "Too many fields." });

@@ -3,7 +3,7 @@
 import { Check, Copy, Download, Layers, PencilLine, RotateCcw, Sparkles, Undo2, Wand2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DiffView } from "@/components/diff-view";
 import { LiveTokenCount } from "@/components/estimates/live-token-count";
@@ -56,6 +56,8 @@ interface WorkspaceProps {
     modelOptions: ModelOption[];
   };
   initialText?: string;
+  /** Opened from the Prompt library. */
+  fromLibrary?: { slug: string; title: string } | null;
 }
 
 const PRIORITY_TONE = { high: "danger", medium: "warn", low: "neutral" } as const;
@@ -69,9 +71,25 @@ function signed(n: number) {
   return n > 0 ? `+${formatNumber(n)}` : formatNumber(n);
 }
 
-export function IntelligenceWorkspace({ models, defaultModel, defaultMode, prompt, initialAnalysis = null, embedded = false, studio, initialText = "" }: WorkspaceProps) {
+export function IntelligenceWorkspace({ models, defaultModel, defaultMode, prompt, initialAnalysis = null, embedded = false, studio, initialText = "", fromLibrary = null }: WorkspaceProps) {
   const router = useRouter();
   const [text, setText] = useState(prompt?.text ?? initialText);
+  // The library page leaves the prompt, with the user's blanks filled in, under this key.
+  const librarySlug = fromLibrary?.slug ?? null;
+  useEffect(() => {
+    if (!librarySlug) return;
+    let filled: string | null = null;
+    try {
+      const key = `piq:library:${librarySlug}`;
+      filled = sessionStorage.getItem(key);
+      sessionStorage.removeItem(key);
+    } catch {
+      // Storage unavailable: keep the template text.
+    }
+    // One-off read from browser storage after hydration; the server can't see it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (filled) setText(filled);
+  }, [librarySlug]);
   const [autoSaved, setAutoSaved] = useState<{ promptId: string; originalVersionId: string; proposedVersionId: string; revisionId: string; text: string } | null>(null);
   const [dialog, setDialog] = useState<null | "save" | "export">(null);
   const [outputPreset, setOutputPreset] = useState<OutputLengthPreset>(DEFAULT_OUTPUT_PRESET);
@@ -339,6 +357,11 @@ export function IntelligenceWorkspace({ models, defaultModel, defaultMode, promp
                 Back to your original prompt
               </Button>
             </div>
+          ) : null}
+          {fromLibrary && !stepInEditor ? (
+            <p className="mt-3 rounded-lg bg-accent-faint px-3 py-2 text-sm" role="status">
+              From the Prompt library: <Link href={`/app/prompt-library/${fromLibrary.slug}`} className="font-medium underline underline-offset-2">{fromLibrary.title}</Link>. Fill any remaining {"{{blanks}}"}, then analyse or optimise it.
+            </p>
           ) : null}
           <Field label="Prompt" className="mt-3">
             {(p) => <Textarea id={p.id} value={text} onChange={(e) => setText(e.target.value)} rows={embedded ? 7 : 10} placeholder="For example: Build an ecommerce website for my bakery" spellCheck />}

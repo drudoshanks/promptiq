@@ -3,6 +3,7 @@
 import {
   BadgeIndianRupee,
   BarChart3,
+  BookOpen,
   CreditCard,
   Gauge,
   History,
@@ -40,6 +41,7 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { href: "/app", label: "Overview", icon: Home, exact: true },
       { href: "/app/studio", label: "Studio", icon: Sparkles },
+      { href: "/app/prompt-library", label: "Prompt library", icon: BookOpen },
       { href: "/app/library", label: "My prompts", icon: Library },
       { href: "/app/suggestions", label: "Suggestions", icon: Lightbulb },
     ],

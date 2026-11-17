@@ -11,6 +11,7 @@ import { listModelOptions } from "@/lib/services/estimates";
 import { getStoredAnalysisView } from "@/lib/services/intelligence";
 import { listEnabledPreferences } from "@/lib/services/preferences";
 import { getPromptPreferences } from "@/lib/services/prompt-preferences";
+import { getTemplate } from "@/lib/services/prompt-library";
 import { getPrompt } from "@/lib/services/prompts";
 
 export const metadata: Metadata = { title: "Studio" };
@@ -20,7 +21,7 @@ export const metadata: Metadata = { title: "Studio" };
  * requirements, compare tokens and cost, then save or export. Combines the
  * former Quick studio and Prompt intelligence pages.
  */
-export default async function StudioPage({ searchParams }: { searchParams: Promise<{ prompt?: string; version?: string }> }) {
+export default async function StudioPage({ searchParams }: { searchParams: Promise<{ prompt?: string; version?: string; template?: string }> }) {
   const user = await getCurrentUser();
   if (!user) redirect("/sign-in?next=/app/studio");
   const params = await searchParams;
@@ -47,9 +48,23 @@ export default async function StudioPage({ searchParams }: { searchParams: Promi
     }
   }
 
+  // Opened from the Prompt library: start from that template (the library page
+  // hands over any filled-in blanks through sessionStorage).
+  let template: { slug: string; title: string; text: string } | null = null;
+  if (!prompt && params.template && /^[a-z0-9-]{1,80}$/.test(params.template)) {
+    try {
+      const t = await getTemplate(db, params.template);
+      template = { slug: t.slug, title: t.title, text: t.promptText };
+    } catch {
+      template = null;
+    }
+  }
+
   return (
     <IntelligenceWorkspace
-      key={prompt?.versionId ?? "new"}
+      key={prompt?.versionId ?? template?.slug ?? "new"}
+      initialText={template?.text ?? ""}
+      fromLibrary={template ? { slug: template.slug, title: template.title } : null}
       models={models.map((m) => ({ id: m.id, label: m.label }))}
       defaultModel={defaultModel}
       defaultMode={prefs.defaultOptimisationMode}
