@@ -289,6 +289,34 @@ export const modelPricing = pgTable(
   (t) => [index("idx_model_pricing_lookup").on(t.provider, t.modelId, t.effectiveFrom)],
 );
 
+export const PROMPT_TEMPLATE_SOURCES = ["promptiq", "awesome-chatgpt-prompts"] as const;
+export const PROMPT_TEMPLATE_LICENSES = ["PromptIQ original", "CC0-1.0"] as const;
+
+/** Prompt library catalogue (public, read-only; see 0008_prompt_templates.sql). */
+export const promptTemplates = pgTable("prompt_templates", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  slug: text("slug").notNull().unique(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  category: text("category").notNull(),
+  tags: text("tags").array().notNull().default(sql`'{}'`),
+  tagsText: text("tags_text").notNull().default(""),
+  promptText: text("prompt_text").notNull(),
+  variables: text("variables").array().notNull().default(sql`'{}'`),
+  source: text("source", { enum: PROMPT_TEMPLATE_SOURCES }).notNull(),
+  sourceUrl: text("source_url"),
+  license: text("license", { enum: PROMPT_TEMPLATE_LICENSES }).notNull(),
+  author: text("author"),
+  featured: boolean("featured").notNull().default(false),
+  sortRank: integer("sort_rank").notNull().default(1000),
+  useCount: integer("use_count").notNull().default(0),
+  contentHash: text("content_hash").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: tz("created_at").notNull().defaultNow(),
+  updatedAt: tz("updated_at").notNull().defaultNow(),
+});
+export type PromptTemplateRow = typeof promptTemplates.$inferSelect;
+
 export const ESTIMATE_LABELS = ["original", "optimised", "final", "adhoc"] as const;
 export type EstimateLabel = (typeof ESTIMATE_LABELS)[number];
 

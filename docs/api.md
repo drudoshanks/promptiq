@@ -201,6 +201,13 @@ response adds `classification`, `score.dimensions`, `missing_information`,
 `is_current`.
 
 
+## Prompt library
+
+`GET /prompt-library` (search: `q`, `category`, `sort`, `page`, `page_size`),
+`GET /prompt-library/{slug}`, `POST /prompt-library/{slug}/use` and
+`POST /prompt-library/{slug}/save`. See
+[`prompt-catalogue.md`](prompt-catalogue.md#api).
+
 ## UPI payments
 
 `/billing/plans`, `/billing/payment-requests` (+ `/{id}`, `/{id}/submit`,

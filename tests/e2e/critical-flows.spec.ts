@@ -207,6 +207,35 @@ test("break down: a big prompt becomes step-by-step prompts with advice, saved t
   await expect(page.getByRole("link", { name: /^4\/4 Check everything/ }).first()).toBeVisible();
 });
 
+test("prompt library: search, fill the blanks, open in the Studio and save to My prompts", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/app/prompt-library");
+  await expect(page.getByRole("heading", { name: "Prompt library", level: 1 })).toBeVisible();
+  await page.getByRole("searchbox", { name: "Search" }).fill("cold email");
+  await page.getByRole("button", { name: "Search", exact: true }).click();
+  await page.waitForURL(/q=cold\+email/);
+  await page.getByRole("link", { name: /Personalised cold email/ }).first().click();
+  await page.waitForURL(/\/app\/prompt-library\/cold-outreach-email/);
+
+  await page.getByLabel("Sender").fill("Meera from Lumen Studio");
+  const preview = page.getByTestId("library-preview");
+  await expect(preview).toContainText("Meera from Lumen Studio");
+  await expect(preview).toContainText("{{company}}");
+
+  await page.getByRole("button", { name: "Open in Studio" }).click();
+  await page.waitForURL(/\/app\/studio\?template=cold-outreach-email/);
+  await expect(page.getByLabel("Prompt", { exact: true })).toHaveValue(/Meera from Lumen Studio/);
+  await expect(page.getByText(/From the Prompt library/)).toBeVisible();
+
+  await page.goBack();
+  await page.waitForURL(/\/app\/prompt-library\/cold-outreach-email/);
+  await page.getByLabel("Sender").fill("Meera from Lumen Studio");
+  await page.getByRole("button", { name: "Save to My prompts" }).click();
+  await page.getByRole("link", { name: "Open it in My prompts" }).click();
+  await page.waitForURL(/\/app\/library\/[0-9a-f-]{36}/);
+  await expect(page.getByText("Meera from Lumen Studio").first()).toBeVisible();
+});
+
 test("UPI: pay by QR, submit the UTR, an administrator verifies, and Pro activates", async ({ page, browser }) => {
   const adminEmail = process.env.E2E_ADMIN_EMAIL;
   const adminPassword = process.env.E2E_ADMIN_PASSWORD;

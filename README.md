@@ -147,6 +147,14 @@ for suggestions, history and token/cost analytics, and explicit prompt
 preferences. Design, metrics definitions and privacy rules:
 [`docs/prompt-library.md`](docs/prompt-library.md).
 
+## Prompt library
+
+A searchable catalogue of 264 ready-to-use prompts in 13 categories: 82 written
+for PromptIQ and 182 public-domain (CC0) prompts from awesome-chatgpt-prompts,
+each with its source and licence. Fill in the blanks, then copy, open in the
+Studio or save to My prompts. `npm run db:migrate` loads it. Sources, curation
+and how to rebuild it: [`docs/prompt-catalogue.md`](docs/prompt-catalogue.md).
+
 ## Prompt intelligence
 
 The **Studio** (`/app/studio`, also embedded on every saved prompt; the old
