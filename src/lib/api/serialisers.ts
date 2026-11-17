@@ -12,10 +12,12 @@ export function serialiseMe(user: CurrentUser) {
     plan: {
       code: plan.code,
       name: plan.name,
-      optimisations_per_period: plan.optimisationsPerPeriod,
+      unlimited: plan.unlimited,
+      /** null means no limit (free mode). */
+      optimisations_per_period: plan.unlimited ? null : plan.optimisationsPerPeriod,
       max_prompt_chars: plan.maxPromptChars,
-      max_saved_prompts: plan.maxSavedPrompts,
-      max_versions_per_prompt: plan.maxVersionsPerPrompt,
+      max_saved_prompts: plan.unlimited ? null : plan.maxSavedPrompts,
+      max_versions_per_prompt: plan.unlimited ? null : plan.maxVersionsPerPrompt,
     },
     settings: {
       history_enabled: user.historyEnabled,

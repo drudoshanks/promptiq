@@ -61,6 +61,8 @@ const schema = z.object({
   OPTIMISER_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(300).max(8000).default(1500),
   OPTIMISER_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120_000).default(20_000),
   GLOBAL_DAILY_SPEND_CAP_USD: z.coerce.number().min(0).default(25),
+  /** "true" (default): everything is free, with no quotas, caps or per-user rate limits. "false": plans and payments. */
+  FREE_MODE: z.enum(["true", "false"]).default("true"),
 
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
@@ -115,7 +117,8 @@ export const env: Env = loadEnv();
 export const features = {
   googleAuth: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
   githubAuth: Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET),
-  billing: Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_PRICE_PRO_MONTHLY),
+  billing: Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_PRICE_PRO_MONTHLY) && env.FREE_MODE === "false",
   email: Boolean(env.RESEND_API_KEY),
-  upiPayments: Boolean(env.UPI_VPA),
+  upiPayments: Boolean(env.UPI_VPA) && env.FREE_MODE === "false",
+  freeMode: env.FREE_MODE !== "false",
 };

@@ -7,7 +7,7 @@ import { PaymentStatusBadge } from "@/components/billing/status-badge";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { getCurrentUser } from "@/lib/auth/session";
-import { PLANS } from "@/lib/config/plans";
+import { isFreeMode, PLANS } from "@/lib/config/plans";
 import { db } from "@/lib/db/client";
 import type { PaymentStatus } from "@/lib/db/schema";
 import { features } from "@/lib/env";
@@ -37,14 +37,30 @@ export default async function BillingPage() {
   const pending = requests.filter((r) => ["PENDING_PAYMENT", "SUBMITTED_FOR_VERIFICATION", "UNDER_REVIEW"].includes(r.r.status)).reduce((n, r) => n + r.r.expectedAmountMinor, 0);
   const isPro = user.planCode === "pro";
   const endsOn = sub?.current_period_end ? formatDate(sub.current_period_end) : null;
+  const free = isFreeMode();
 
   return (
     <div className="space-y-8">
       <header className="max-w-3xl">
         <h1>Billing and payments</h1>
-        <p className="mt-2 text-ink-soft">Pay for Pro with any UPI app. Each payment is checked by hand against our bank records before Pro is switched on, so activation is not instant. Nothing renews or charges automatically.</p>
+        <p className="mt-2 text-ink-soft">
+          {free
+            ? "PromptIQ is free right now: every feature, with no limits. There is nothing to pay for and no plan to choose."
+            : "Pay for Pro with any UPI app. Each payment is checked by hand against our bank records before Pro is switched on, so activation is not instant. Nothing renews or charges automatically."}
+        </p>
       </header>
 
+      {free ? (
+        <section aria-labelledby="free-heading" className="rounded-[24px] bg-gradient-to-br from-brand-light via-accent to-[#d95300] p-7 text-white shadow-[var(--shadow-brand)]">
+          <h2 id="free-heading" className="text-[1.5rem] text-white">
+            100% free, no limits
+          </h2>
+          <p className="mt-2 text-white/90">Unlimited optimisations, analyses and breakdowns, and unlimited saved prompts and versions. No card, no UPI, no quotas.</p>
+        </section>
+      ) : null}
+
+      {free ? null : (
+        <>
       <section aria-labelledby="current-heading" className="panel grid gap-6 p-5 sm:grid-cols-2 lg:grid-cols-4">
         <h2 id="current-heading" className="sr-only">
           Current plan
@@ -91,7 +107,10 @@ export default async function BillingPage() {
           </div>
         )}
       </section>
+        </>
+      )}
 
+      {free && requests.length === 0 ? null : (
       <section aria-labelledby="history-heading">
         <h2 id="history-heading" className="text-lg">
           Payment history
@@ -142,6 +161,7 @@ export default async function BillingPage() {
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }

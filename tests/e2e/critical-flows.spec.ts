@@ -211,6 +211,7 @@ test("UPI: pay by QR, submit the UTR, an administrator verifies, and Pro activat
   const adminEmail = process.env.E2E_ADMIN_EMAIL;
   const adminPassword = process.env.E2E_ADMIN_PASSWORD;
   test.skip(!adminEmail || !adminPassword, "Set E2E_ADMIN_EMAIL and E2E_ADMIN_PASSWORD (an account listed in ADMIN_EMAILS) to run this flow.");
+  test.skip((process.env.FREE_MODE ?? "true") !== "false", "UPI payments are off in free mode. Run the app and this test with FREE_MODE=false.");
   const utr = `${Date.now()}`.slice(-9) + String(Math.floor(Math.random() * 900) + 100);
 
   await signIn(page);
