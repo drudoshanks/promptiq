@@ -23,12 +23,13 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
   const { checkout } = await searchParams;
   const [usage, subscription, savedPrompts] = await Promise.all([getUsageSummary(db, user), getSubscription(db, user.id), countPrompts(db, user.id)]);
   const percent = usage.limit ? Math.min(100, Math.round((usage.used / usage.limit) * 100)) : 0;
+  const unlimited = usage.plan.unlimited;
 
   return (
     <div className="space-y-8">
       <div>
-        <h1>Usage and plan</h1>
-        <p className="mt-2 text-ink-soft">Numbers come from the server ledger, the same one that enforces your quota.</p>
+        <h1>{unlimited ? "Usage" : "Usage and plan"}</h1>
+        <p className="mt-2 text-ink-soft">{unlimited ? "PromptIQ is free right now, with no limits. These numbers are for your information." : "Numbers come from the server ledger, the same one that enforces your quota."}</p>
       </div>
 
       {checkout === "success" ? (
@@ -40,21 +41,27 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
         <section className="panel p-5">
           <h2 className="text-base">This period</h2>
           <p className="mt-3 text-3xl font-extrabold tracking-[-0.035em] tabular-nums">
-            {formatNumber(usage.used)} <span className="text-base text-ink-faint">of {formatNumber(usage.limit)} optimisations</span>
+            {formatNumber(usage.used)} <span className="text-base font-medium tracking-normal text-ink-faint">{unlimited ? "optimisations · unlimited" : `of ${formatNumber(usage.limit)} optimisations`}</span>
           </p>
-          <div className="meter mt-3" role="meter" aria-valuemin={0} aria-valuemax={usage.limit} aria-valuenow={usage.used} aria-label="Optimisations used">
-            <span style={{ width: `${percent}%` }} />
-          </div>
+          {unlimited ? null : (
+            <div className="meter mt-3" role="meter" aria-valuemin={0} aria-valuemax={usage.limit} aria-valuenow={usage.used} aria-label="Optimisations used">
+              <span style={{ width: `${percent}%` }} />
+            </div>
+          )}
           <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
             <dt className="text-ink-soft">Period</dt>
             <dd>
               {formatDate(usage.period.start)} to {formatDate(usage.period.end)}
             </dd>
-            <dt className="text-ink-soft">Resets</dt>
-            <dd>{formatDate(usage.period.end)}</dd>
+            {unlimited ? null : (
+              <>
+                <dt className="text-ink-soft">Resets</dt>
+                <dd>{formatDate(usage.period.end)}</dd>
+              </>
+            )}
             <dt className="text-ink-soft">Saved prompts</dt>
             <dd>
-              {formatNumber(savedPrompts)} of {formatNumber(usage.plan.maxSavedPrompts)}
+              {unlimited ? formatNumber(savedPrompts) : `${formatNumber(savedPrompts)} of ${formatNumber(usage.plan.maxSavedPrompts)}`}
             </dd>
             <dt className="text-ink-soft">Tokens this period</dt>
             <dd>
@@ -70,13 +77,22 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
 
         <section className="panel p-5">
           <h2 className="text-base">Plan</h2>
-          <p className="mt-3 text-3xl font-extrabold tracking-[-0.035em] tabular-nums">{usage.plan.name}</p>
+          <p className="mt-3 text-3xl font-extrabold tracking-[-0.035em] tabular-nums">{unlimited ? "Free, unlimited" : usage.plan.name}</p>
           {subscription ? (
             <p className="mt-1 text-sm text-ink-soft">
               Subscription {subscription.status.replace("_", " ")}
               {subscription.cancelAtPeriodEnd && subscription.currentPeriodEnd ? `, ends ${formatDate(subscription.currentPeriodEnd)}` : subscription.currentPeriodEnd ? `, renews ${formatDate(subscription.currentPeriodEnd)}` : ""}
             </p>
           ) : null}
+          {unlimited ? (
+            <ul className="mt-4 space-y-1 text-[0.9375rem] text-ink-soft">
+              <li>Unlimited optimisations, analyses and breakdowns</li>
+              <li>Prompts up to {formatNumber(usage.plan.maxPromptChars)} characters</li>
+              <li>Unlimited saved prompts and versions</li>
+              <li>Every export format</li>
+            </ul>
+          ) : (
+          <>
           <ul className="mt-4 space-y-1 text-[0.9375rem] text-ink-soft">
             <li>{formatNumber(usage.plan.optimisationsPerPeriod)} optimisations per period</li>
             <li>Prompts up to {formatNumber(usage.plan.maxPromptChars)} characters</li>
@@ -97,6 +113,8 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
               </p>
             ) : null}
           </div>
+          </>
+          )}
         </section>
       </div>
     </div>

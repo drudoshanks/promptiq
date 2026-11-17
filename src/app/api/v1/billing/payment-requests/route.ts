@@ -1,4 +1,6 @@
+import { AppError } from "@/lib/api/errors";
 import { created, ok, parseJson, withApi } from "@/lib/api/handler";
+import { isFreeMode } from "@/lib/config/plans";
 import { createPaymentRequestSchema } from "@/lib/api/validation";
 import { db } from "@/lib/db/client";
 import { dispatchNotificationsSoon, upiConfig } from "@/lib/services/payment-context";
@@ -16,6 +18,7 @@ export const GET = withApi({ auth: "required" }, async ({ user }) => {
  * Re-selecting the plan of an open request returns it (200) instead of a duplicate.
  */
 export const POST = withApi({ auth: "required", rateLimit: "paymentCreatePerHour" }, async ({ request, user }) => {
+  if (isFreeMode()) throw new AppError("FORBIDDEN", "PromptIQ is free right now, so there's nothing to pay for.");
   const body = await parseJson(request, createPaymentRequestSchema);
   const result = await createPaymentRequest(db, user, { planCode: body.plan_code }, upiConfig());
   if (result.created) dispatchNotificationsSoon();

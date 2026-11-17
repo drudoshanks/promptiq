@@ -5,7 +5,7 @@ import { IMARWAR, ImarwarLogo, ProductLogo } from "@/components/brand";
 import { DiffView } from "@/components/diff-view";
 import { EstimateBadge } from "@/components/ui/badge";
 import { LinkButton } from "@/components/ui/button";
-import { PLANS } from "@/lib/config/plans";
+import { HARD_MAX_PROMPT_CHARS, isFreeMode, PLANS } from "@/lib/config/plans";
 import { estimateTokens } from "@/lib/tokens";
 import { formatNumber } from "@/lib/utils";
 
@@ -59,6 +59,17 @@ const FAQ = [
   { q: "Can I pay from India?", a: "Yes. Pro is available in rupees with UPI. Pay with any UPI app, submit the reference, and your plan activates once the payment is verified. PromptIQ never asks for your UPI PIN or OTP." },
 ];
 
+const FREE_FAQ = { q: "Is PromptIQ really free?", a: "Yes. Right now every feature is free for everyone, with no monthly limits: optimise, analyse and break down as many prompts as you like, and save as many as you want. No card or UPI needed." };
+
+const FREE_INCLUDES = [
+  "Unlimited optimisations, analyses and breakdowns",
+  `Prompts up to ${HARD_MAX_PROMPT_CHARS.toLocaleString("en")} characters`,
+  "Unlimited saved prompts and versions",
+  "Requirement checks, token counts and cost estimates",
+  "Text, Markdown and JSON export",
+  "Usage analytics",
+];
+
 function Swoosh() {
   return (
     <svg aria-hidden="true" viewBox="0 0 300 24" preserveAspectRatio="none" className="absolute -bottom-2 left-0 h-3 w-full sm:-bottom-3 sm:h-4">
@@ -74,6 +85,8 @@ function Swoosh() {
 }
 
 export default function LandingPage() {
+  const free = isFreeMode();
+  const faq = free ? [FREE_FAQ, ...FAQ.filter((f) => f.q !== "Can I pay from India?")] : FAQ;
   const before = estimateTokens(SAMPLE_BEFORE);
   const after = estimateTokens(SAMPLE_AFTER);
   return (
@@ -348,6 +361,43 @@ export default function LandingPage() {
         </section>
 
         {/* Pricing */}
+        {free ? (
+        <section id="pricing" className="scroll-mt-24 bg-panel">
+          <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:py-28">
+            <div className="mx-auto max-w-2xl text-center">
+              <p className="eyebrow justify-center">Pricing</p>
+              <h2 className="mt-4 text-[2rem] font-extrabold tracking-[-0.035em] sm:text-[2.75rem]">
+                <span className="text-brand-gradient">100% free.</span> No limits.
+              </h2>
+              <p className="mx-auto mt-4 text-lg text-ink-soft">Every feature is free for everyone right now. No card, no UPI, no monthly quotas.</p>
+            </div>
+            <div className="mx-auto mt-12 max-w-3xl rounded-[24px] bg-gradient-to-b from-brand-light to-accent p-[2px] shadow-[var(--shadow-brand)]">
+              <div className="rounded-[22px] bg-panel p-8 sm:p-10">
+                <div className="flex flex-wrap items-end justify-between gap-4">
+                  <div>
+                    <h3 className="text-[1.375rem]">Everything included</h3>
+                    <p className="mt-3 text-[3rem] font-extrabold leading-none tracking-[-0.04em]">₹0</p>
+                  </div>
+                  <span className="badge badge-accent">Free for everyone</span>
+                </div>
+                <ul className="mt-7 grid gap-3 text-[0.9375rem] text-ink-soft sm:grid-cols-2">
+                  {FREE_INCLUDES.map((item) => (
+                    <li key={item} className="flex gap-2.5">
+                      <Check className="mt-0.5 h-4 w-4 flex-none text-accent" aria-hidden="true" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-8">
+                  <LinkButton href="/sign-up" variant="primary" size="lg" className="w-full">
+                    Get started free
+                  </LinkButton>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        ) : (
         <section id="pricing" className="scroll-mt-24 bg-panel">
           <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:py-28">
             <div className="mx-auto max-w-2xl text-center">
@@ -396,6 +446,7 @@ export default function LandingPage() {
             </p>
           </div>
         </section>
+        )}
 
         {/* FAQ */}
         <section id="faq" className="scroll-mt-24">
@@ -415,7 +466,7 @@ export default function LandingPage() {
               </p>
             </div>
             <div className="space-y-3">
-              {FAQ.map((item, i) => (
+              {faq.map((item, i) => (
                 <details key={item.q} className="group panel p-0" open={i === 0}>
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5 text-[1.0625rem] font-bold [&::-webkit-details-marker]:hidden">
                     {item.q}
@@ -437,7 +488,7 @@ export default function LandingPage() {
             <div className="relative flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
               <div className="max-w-2xl">
                 <h2 className="text-[2rem] font-extrabold tracking-[-0.035em] sm:text-[2.5rem]">Ready to write prompts that work the first time?</h2>
-                <p className="mt-3 text-lg text-white/90">Free to start. No card needed.</p>
+                <p className="mt-3 text-lg text-white/90">{free ? "100% free, no limits. No card needed." : "Free to start. No card needed."}</p>
               </div>
               <div className="flex flex-none flex-wrap gap-3">
                 <Link href="/sign-up" className="btn btn-lg bg-white text-accent-deep hover:bg-white/90">

@@ -20,6 +20,8 @@ export interface PlanLimits {
   maxVersionsPerPrompt: number;
   /** Markdown/JSON export and usage analytics. */
   advancedExport: boolean;
+  /** No monthly quotas or library caps (free mode). */
+  unlimited: boolean;
 }
 
 export const PLANS: Record<PlanCode, PlanLimits> = {
@@ -33,6 +35,7 @@ export const PLANS: Record<PlanCode, PlanLimits> = {
     maxSavedPrompts: 25,
     maxVersionsPerPrompt: 10,
     advancedExport: true,
+    unlimited: false,
   },
   pro: {
     code: "pro",
@@ -44,12 +47,40 @@ export const PLANS: Record<PlanCode, PlanLimits> = {
     maxSavedPrompts: 2_000,
     maxVersionsPerPrompt: 100,
     advancedExport: true,
+    unlimited: false,
   },
 };
 
-export function planFor(code: PlanCode): PlanLimits {
-  return PLANS[code] ?? PLANS.free;
-}
-
 /** Absolute ceiling regardless of plan, protecting the provider budget. */
 export const HARD_MAX_PROMPT_CHARS = 40_000;
+
+/** Stands in for "no limit" where a number is required (quota checks, version pruning). */
+export const UNLIMITED = 1_000_000_000;
+
+/**
+ * Free mode: PromptIQ is 100% free for everyone. No monthly quotas, no library
+ * caps, no per-user rate limits and no paid plans on sale. On by default; set
+ * FREE_MODE=false to bring plans, quotas and payments back unchanged.
+ * Read straight from process.env so this module stays importable anywhere.
+ */
+export function isFreeMode(): boolean {
+  return (process.env.FREE_MODE ?? "true").trim().toLowerCase() !== "false";
+}
+
+export const FREE_FOR_ALL: PlanLimits = {
+  code: "free",
+  name: "Free",
+  priceLabel: "Free",
+  optimisationsPerPeriod: UNLIMITED,
+  analysesPerPeriod: UNLIMITED,
+  maxPromptChars: HARD_MAX_PROMPT_CHARS,
+  maxSavedPrompts: UNLIMITED,
+  maxVersionsPerPrompt: UNLIMITED,
+  advancedExport: true,
+  unlimited: true,
+};
+
+export function planFor(code: PlanCode): PlanLimits {
+  if (isFreeMode()) return { ...FREE_FOR_ALL, code: code in PLANS ? code : "free" };
+  return PLANS[code] ?? PLANS.free;
+}

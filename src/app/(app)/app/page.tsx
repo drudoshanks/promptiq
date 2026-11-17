@@ -72,15 +72,19 @@ export default async function DashboardPage() {
             <div className="flex items-baseline justify-between gap-2">
               <p className="text-sm font-semibold text-white/80">Optimisations this period</p>
               <Link href="/app/usage" className="text-[0.8125rem] font-semibold text-brand-light no-underline hover:underline">
-                Usage and plan
+                {usage.plan.unlimited ? "Usage" : "Usage and plan"}
               </Link>
             </div>
             <p className="mt-2 text-[1.75rem] font-extrabold tracking-[-0.03em] tabular-nums">
-              {formatNumber(usage.used)} <span className="text-base font-semibold text-white/50">of {formatNumber(usage.limit)}</span>
+              {formatNumber(usage.used)} <span className="text-base font-semibold text-white/50">{usage.plan.unlimited ? "used · unlimited" : `of ${formatNumber(usage.limit)}`}</span>
             </p>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-              <span className="block h-full rounded-full bg-gradient-to-r from-brand-light to-accent" style={{ width: `${Math.min(100, Math.round((usage.used / Math.max(1, usage.limit)) * 100))}%` }} />
-            </div>
+            {usage.plan.unlimited ? (
+              <p className="mt-2 text-sm font-semibold text-brand-light">PromptIQ is 100% free right now.</p>
+            ) : (
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
+                <span className="block h-full rounded-full bg-gradient-to-r from-brand-light to-accent" style={{ width: `${Math.min(100, Math.round((usage.used / Math.max(1, usage.limit)) * 100))}%` }} />
+              </div>
+            )}
             <Link href="/app/studio" className="mt-4 flex items-center gap-2 text-sm font-semibold text-white/80 no-underline hover:text-white">
               <Layers className="h-4 w-4 text-brand-light" aria-hidden="true" />
               New: break big prompts into steps

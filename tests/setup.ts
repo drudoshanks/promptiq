@@ -8,3 +8,5 @@ process.env.OPTIMISER_PROVIDER ??= "mock";
 process.env.LOG_LEVEL ??= "error";
 process.env.GLOBAL_DAILY_SPEND_CAP_USD ??= "0";
 process.env.ADMIN_EMAILS ??= "ops@example.com";
+// Tests exercise plans, quotas and rate limits; free mode has its own tests.
+process.env.FREE_MODE ??= "false";

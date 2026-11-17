@@ -8,6 +8,21 @@ word with the original, edit, accept, export as TXT/Markdown/JSON, and keep
 every version. Preferences are only ever created by the user, token counts are
 labelled as estimates, and the final prompt is never executed.
 
+## Free mode
+
+PromptIQ is **100% free** by default (`FREE_MODE=true`):
+
+- **No limits:** no monthly quotas, no caps on saved prompts or versions, and no per-user rate limits.
+- **Prompt length:** up to 40,000 characters, the technical ceiling.
+- **No payments:** plans and payment pages are hidden, and new payment requests are refused. Admins can still see past payments.
+
+**What still applies:**
+- the per-IP abuse guard (240 requests a minute);
+- sign-in protections;
+- `GLOBAL_DAILY_SPEND_CAP_USD`, which caps your AI bill per day. Set it to `0` to turn it off.
+
+Set `FREE_MODE=false` and restart to bring back the Free and Pro plans, quotas and UPI payments, unchanged.
+
 ## Brand and design
 
 - **Brand:** PromptIQ is branded as a product of iMarwar.

@@ -65,13 +65,16 @@ const GROUPS: Array<{ label: string; items: NavItem[] }> = [
 interface AppNavProps {
   email: string | null;
   isAdmin: boolean;
+  /** Free mode: nothing to pay for, so the billing link is hidden. */
+  freeMode?: boolean;
 }
 
-function NavLinks({ isAdmin, onNavigate }: { isAdmin: boolean; onNavigate?: () => void }) {
+function NavLinks({ isAdmin, freeMode = false, onNavigate }: { isAdmin: boolean; freeMode?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
+  const base = freeMode ? GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => i.href !== "/app/billing").map((i) => (i.href === "/app/usage" ? { ...i, label: "Usage" } : i)) })) : GROUPS;
   const groups = isAdmin
-    ? [...GROUPS, { label: "Operator", items: [{ href: "/admin", label: "Operations", icon: ShieldCheck, exact: true }, { href: "/admin/payments", label: "Payments", icon: BadgeIndianRupee }] }]
-    : GROUPS;
+    ? [...base, { label: "Operator", items: [{ href: "/admin", label: "Operations", icon: ShieldCheck, exact: true }, { href: "/admin/payments", label: "Payments", icon: BadgeIndianRupee }] }]
+    : base;
   return (
     <nav aria-label="Application" className="space-y-5">
       {groups.map((group) => (
@@ -102,7 +105,7 @@ function Brand() {
 }
 
 /** Application shell: a grouped sidebar on wide screens, a top bar with a drawer on small ones. */
-export function AppNav({ email, isAdmin }: AppNavProps) {
+export function AppNav({ email, isAdmin, freeMode = false }: AppNavProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [signingOut, setSigningOut] = useState(false);
@@ -160,7 +163,7 @@ export function AppNav({ email, isAdmin }: AppNavProps) {
         </div>
         {newPrompt}
         <div className="flex-1">
-          <NavLinks isAdmin={isAdmin} />
+          <NavLinks isAdmin={isAdmin} freeMode={freeMode} />
         </div>
         {account}
       </aside>
@@ -195,7 +198,7 @@ export function AppNav({ email, isAdmin }: AppNavProps) {
         </div>
         {newPrompt}
         <div className="flex-1">
-          <NavLinks isAdmin={isAdmin} onNavigate={() => setOpen(false)} />
+          <NavLinks isAdmin={isAdmin} freeMode={freeMode} onNavigate={() => setOpen(false)} />
         </div>
         {account}
       </div>

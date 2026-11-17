@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { AppNav } from "@/components/app-nav";
+import { isFreeMode } from "@/lib/config/plans";
 import { getCurrentUser } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="canvas-app min-h-dvh lg:flex">
-      <AppNav email={user.email} isAdmin={user.isAdmin} />
+      <AppNav email={user.email} isAdmin={user.isAdmin} freeMode={isFreeMode()} />
       <main className="min-w-0 flex-1">
         <div className="mx-auto max-w-[78rem] px-4 py-6 sm:px-6 lg:px-10 lg:py-10">{children}</div>
       </main>

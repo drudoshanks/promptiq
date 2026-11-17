@@ -1,3 +1,4 @@
+import { isFreeMode } from "@/lib/config/plans";
 import "server-only";
 
 import { NextResponse, type NextRequest } from "next/server";
@@ -110,7 +111,8 @@ export function withApi<A extends AuthMode, TParams extends Record<string, strin
         if (options.auth === "admin" && !user?.isAdmin) throw forbidden("Operator access required.");
       }
 
-      if (user && options.rateLimit) {
+      // Free mode lifts per-user limits; the per-IP abuse guard above still applies.
+      if (user && options.rateLimit && !isFreeMode()) {
         const spec = RATE_LIMITS[options.rateLimit];
         const limit = checkRateLimit(`user:${user.id}:${options.rateLimit}`, spec.limit, spec.windowMs);
         if (!limit.allowed) {
