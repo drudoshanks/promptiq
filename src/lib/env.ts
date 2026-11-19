@@ -103,6 +103,10 @@ function loadEnv(): Env {
     throw new Error(`Invalid environment configuration: ${issues}`);
   }
   const env = parsed.data;
+  // On Vercel without APP_URL, use the project's production address.
+  if (!process.env.APP_URL && process.env.VERCEL_PROJECT_PRODUCTION_URL) env.APP_URL = `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
+  // "https://example.com/" and "https://example.com" mean the same; links are built as `${APP_URL}/path`.
+  env.APP_URL = env.APP_URL.replace(/\/+$/, "");
   if (env.OPTIMISER_PROVIDER === "openai" && !env.OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY is required when OPTIMISER_PROVIDER=openai");
   }

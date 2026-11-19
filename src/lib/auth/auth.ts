@@ -9,6 +9,8 @@ import { authSchema } from "@/lib/db/schema";
 import { sendEmail } from "@/lib/email";
 import { env, features } from "@/lib/env";
 import { logger } from "@/lib/logger";
+
+import { trustedOriginsFor } from "./origins";
 import { ensureAppUser } from "@/lib/services/users";
 
 /** Sessions younger than this count as "recent re-authentication" (SRS §12.2). */
@@ -23,7 +25,8 @@ export const auth = betterAuth({
   appName: "PromptIQ",
   baseURL: env.APP_URL,
   secret: env.AUTH_SECRET,
-  trustedOrigins: [env.APP_URL],
+  // APP_URL, the Vercel addresses and the address the request came in on (see ./origins.ts).
+  trustedOrigins: (request) => trustedOriginsFor(request?.headers),
   database: drizzleAdapter(db, { provider: "pg", schema: authSchema }),
   advanced: {
     database: { generateId: () => crypto.randomUUID() },

@@ -4,6 +4,7 @@ import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { type ZodType } from "zod";
 
+import { isTrustedOrigin } from "@/lib/auth/origins";
 import { getCurrentUserFromHeaders, type CurrentUser } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 import { logger, type RequestLogger } from "@/lib/logger";
@@ -52,8 +53,7 @@ function clientIp(request: NextRequest): string {
 
 function sameOrigin(request: NextRequest): boolean {
   const origin = request.headers.get("origin");
-  const appOrigin = new URL(env.APP_URL).origin;
-  if (origin) return origin === appOrigin;
+  if (origin) return isTrustedOrigin(origin, request.headers);
   const site = request.headers.get("sec-fetch-site");
   if (site && site !== "same-origin" && site !== "none") return false;
   // Non-browser clients (curl, tests) send neither header; cookie-less bearer
@@ -101,6 +101,7 @@ export function withApi<A extends AuthMode, TParams extends Record<string, strin
       }
 
       if ((options.csrf ?? true) && method !== "GET" && method !== "HEAD" && !sameOrigin(request)) {
+        log.warn("cross-site request rejected", { origin: request.headers.get("origin"), host: request.headers.get("x-forwarded-host") ?? request.headers.get("host") });
         throw new AppError("FORBIDDEN", "Cross-site request rejected.");
       }
 
